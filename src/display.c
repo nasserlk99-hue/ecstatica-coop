@@ -17,6 +17,7 @@
 #include "move.h"
 #include "music.h"
 #include "prof.h"
+#include "player.h"
 #include "raster.h"
 #include "render.h"
 #include "topo.h"
@@ -39,6 +40,15 @@ int16_t bottom_edge = 480;
 int32_t zoom_factor = 0;
 int32_t near_clip = 0;
 int16_t top_clip = 0;
+static bool s_drawing_second_coop_view;
+static struct {
+    actor_t *actor;
+    subarea_t *area_to_clear;
+    subarea_t area;
+    subarea_t bounding_box;
+    uint16_t flags;
+} s_coop_view_actor_state[THING_TAB_SIZE];
+static int s_coop_view_actor_count;
 
 char *bitmap[6] = {0};
 char *hires_bitmap[6] = {0};
@@ -754,7 +764,9 @@ void draw_parts(void) {
         if (actor->flags & 0x0800) continue;
         if (make_backgrounds && actor == selected_thing) continue;
 
-        if (number_to_clear[db] >= 150) {
+        if (s_drawing_second_coop_view) {
+            actor->area_to_clear = &null_area_to_clear;
+        } else if (number_to_clear[db] >= 150) {
             beep_message("ClearTab overflow!");
             actor->area_to_clear = &null_area_to_clear;
         } else {
@@ -804,15 +816,48 @@ void draw_parts(void) {
     PROF_END(PROF_BANDS);
 
     /* Pass 5: clamp each area_to_clear to viewport edges. */
-    for (actor_t *actor = root_thing; actor; actor = actor->next_in_display_list) {
-        if (!(actor->flags & 0x08)) continue;
-        if (actor->flags & 0x0800) continue;
-        subarea_t *a = actor->area_to_clear;
-        if (!a) continue;
-        if (a->left   < left_edge)     a->left   = left_edge;
-        if (a->top    < top_edge)      a->top    = top_edge;
-        if (a->right  > right_edge - 1)  a->right  = right_edge - 1;
-        if (a->bottom > bottom_edge - 1) a->bottom = bottom_edge - 1;
+    if (!s_drawing_second_coop_view) {
+        for (actor_t *actor = root_thing; actor; actor = actor->next_in_display_list) {
+            if (!(actor->flags & 0x08)) continue;
+            if (actor->flags & 0x0800) continue;
+            subarea_t *a = actor->area_to_clear;
+            if (!a) continue;
+            if (a->left   < left_edge)     a->left   = left_edge;
+            if (a->top    < top_edge)      a->top    = top_edge;
+            if (a->right  > right_edge - 1)  a->right  = right_edge - 1;
+            if (a->bottom > bottom_edge - 1) a->bottom = bottom_edge - 1;
+        }
+    }
+
+    /* Simulation and actor preparation have already run once. Reproject the
+     * prepared actors from P2's camera into a second hardware draw list. */
+    if (!s_drawing_second_coop_view && render_split_screen_active() &&
+        coop_split_view_begin_player2()) {
+        s_coop_view_actor_count = 0;
+        for (actor_t *a = root_thing; a && s_coop_view_actor_count < THING_TAB_SIZE;
+             a = a->next_in_display_list) {
+            int i = s_coop_view_actor_count++;
+            s_coop_view_actor_state[i].actor = a;
+            s_coop_view_actor_state[i].area_to_clear = a->area_to_clear;
+            s_coop_view_actor_state[i].bounding_box = a->bounding_box;
+            s_coop_view_actor_state[i].flags = a->flags;
+            if (a->area_to_clear)
+                s_coop_view_actor_state[i].area = *a->area_to_clear;
+        }
+        render_frame_next_view();
+        s_drawing_second_coop_view = true;
+        draw_parts();
+        s_drawing_second_coop_view = false;
+        coop_split_view_end_player2();
+        for (int i = 0; i < s_coop_view_actor_count; i++) {
+            actor_t *a = s_coop_view_actor_state[i].actor;
+            if (!a) continue;
+            a->area_to_clear = s_coop_view_actor_state[i].area_to_clear;
+            a->bounding_box = s_coop_view_actor_state[i].bounding_box;
+            a->flags = s_coop_view_actor_state[i].flags;
+            if (a->area_to_clear)
+                *a->area_to_clear = s_coop_view_actor_state[i].area;
+        }
     }
 }
 

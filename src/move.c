@@ -1973,6 +1973,10 @@ void smart_bomb(actor_t *attacker, int range, int damage) {
         if (vrep->action_slots[3] < 0 && victim != selected_thing) continue;
         if (victim == attacker) continue;
 
+        /* Co-op: smart bombs don't hurt other players */
+        if (coop_is_player_actor(victim) && coop_is_player_actor(attacker))
+            continue;
+
         int dx = victim->position_vector.X - attacker->position_vector.X;
         int dz = victim->position_vector.Z - attacker->position_vector.Z;
         int abs_dx = abs(dx);
@@ -2768,6 +2772,14 @@ void see_if_anything_hit(part_t *part, int16_t hit_param) {
 
         if (target->part_heap_link &&
             target->part_heap_link->parent_actor == hitter_actor) { HREJ("held-by-hitter"); continue; }
+
+        /* Co-op: don't let players hit each other */
+        if (coop_is_player_actor(target) || coop_is_player_actor(hitter_actor)) {
+            /* If either is a player and the other is also a player, skip */
+            if (coop_is_player_actor(target) && coop_is_player_actor(hitter_actor)) {
+                HREJ("player-vs-player"); continue;
+            }
+        }
 
         if (!target->actor_reperture || target->actor_reperture->action_slots[34] < 0) {
             HREJ("no-interact-slot(34)"); continue;

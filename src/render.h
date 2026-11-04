@@ -50,7 +50,9 @@ void render_shutdown(void);
 /* Frame boundaries. begin() restores the background colour and depth, end()
  * flushes every pass, composites the 2D plane and presents. */
 void render_frame_begin(void);
+void render_frame_next_view(void);
 void render_frame_end(void);
+bool render_split_screen_active(void);
 
 /* Leaf draws. Called only when render_backend == RENDER_HARDWARE. */
 void render_ellipsoid(part_t *part, int plane);
@@ -68,7 +70,9 @@ void render_invalidate_palette(void);
 #define render_init()                  ((void)0)
 #define render_shutdown()              ((void)0)
 #define render_frame_begin()           ((void)0)
+#define render_frame_next_view()       ((void)0)
 #define render_frame_end()             ((void)0)
+#define render_split_screen_active()   false
 #define render_ellipsoid(p, pl)        ((void)(p), (void)(pl))
 #define render_triangle(t, pl, s)      ((void)(t), (void)(pl), (void)(s))
 #define render_invalidate_background() ((void)0)

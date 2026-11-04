@@ -28,10 +28,12 @@ int16_t render_map3d          = 0;   /* 0 = pre-rendered, 1 = 3D map */
 #include "game.h"
 #include "init.h"
 #include "map.h"
+#include "net.h"
 #include "topo.h"
 #include "win.h"
 #include "platform.h"
 #include "file.h"
+#include "player.h"
 #include <string.h>
 #include <time.h>
 #include <stdlib.h>
@@ -44,14 +46,22 @@ static bool s_frame_begun = false;   /* 3D content was started this frame */
  * Sized from the engine's own pools, so they cannot overflow: one ellipsoid
  * per part, and quads split into two triangles hence the doubling.
  */
-static render_ellipsoid_t s_ellipsoids[PART_POOL_SIZE];
+static render_ellipsoid_t s_ellipsoid_storage[2][PART_POOL_SIZE];
+static render_ellipsoid_t *s_ellipsoids = s_ellipsoid_storage[0];
 static int                s_ellipsoid_count;
-static render_vertex_t    s_flat_verts[TRI_SIZE * 2 * 3];
+#define RENDER_VERTEX_CAP (TRI_SIZE * 2 * 3)
+static render_vertex_t    s_flat_storage[2][RENDER_VERTEX_CAP];
+static render_vertex_t   *s_flat_verts = s_flat_storage[0];
 static int                s_flat_count;
-static render_vertex_t    s_tex_verts[TRI_SIZE * 2 * 3];
+static render_vertex_t    s_tex_storage[2][RENDER_VERTEX_CAP];
+static render_vertex_t   *s_tex_verts = s_tex_storage[0];
 static int                s_tex_count;
 
 render_frame_t render_frame;
+render_frame_t render_views[2];
+int render_view_count = 1;
+static int s_capture_view;
+static bool s_split_capture;
 
 /* ── Fixed-point helpers ──────────────────────────────────── */
 
@@ -103,11 +113,11 @@ static void build_view_matrix(float *m) {
  * everything else keeps interpolated depth and early-Z. Engine +Y is down and
  * +Z into the screen; both are baked in here.
  */
-static void build_proj_matrix(float *m) {
+static void build_proj_matrix(float *m, bool split_view) {
     const float near_z = (float)RENDER_NEAR_Z;
     const float far_z  = (float)RENDER_FAR_Z;
 
-    float sw = (float)screen_width;
+    float sw = (float)screen_width / (split_view ? 2.0f : 1.0f);
     float sh = (float)screen_height;
 
     float kx = (float)zoom_factor * ((float)view_width / 320.0f) / 16384.0f;
@@ -234,14 +244,14 @@ static void emit_triangle(tri_t *tri, tri_t *shade, const int *uv) {
         layer = render_gl_texture_layer(tri->texture_name_index);
 
     if (layer >= 0) {
-        if (s_tex_count + 3 > (int)(sizeof(s_tex_verts) / sizeof(s_tex_verts[0]))) return;
+        if (s_tex_count + 3 > RENDER_VERTEX_CAP) return;
         render_vertex_t *d = &s_tex_verts[s_tex_count];
         push_vertex(&d[0], tri->point1, uv[0], uv[1], pal, layer);
         push_vertex(&d[1], tri->point2, uv[2], uv[3], pal, layer);
         push_vertex(&d[2], tri->point3, uv[4], uv[5], pal, layer);
         s_tex_count += 3;
     } else {
-        if (s_flat_count + 3 > (int)(sizeof(s_flat_verts) / sizeof(s_flat_verts[0]))) return;
+        if (s_flat_count + 3 > RENDER_VERTEX_CAP) return;
         render_vertex_t *d = &s_flat_verts[s_flat_count];
         push_vertex(&d[0], tri->point1, 0, 0, pal, -1);
         push_vertex(&d[1], tri->point2, 0, 0, pal, -1);
@@ -1127,8 +1137,18 @@ static void build_map_mesh(void) {
     s_map_count = 0;
     s_map_gen++;
 
-    int r0 = crow - MAP_VIEW_RADIUS, r1 = crow + MAP_VIEW_RADIUS;
-    int c0 = ccol - MAP_VIEW_RADIUS, c1 = ccol + MAP_VIEW_RADIUS;
+    int radius = MAP_VIEW_RADIUS;
+    if (s_split_capture && coop_players[0].actor && coop_players[1].actor) {
+        int dx = abs((int)coop_players[0].actor->position_vector.X -
+                     (int)coop_players[1].actor->position_vector.X) / MAP_CELL;
+        int dz = abs((int)coop_players[0].actor->position_vector.Z -
+                     (int)coop_players[1].actor->position_vector.Z) / MAP_CELL;
+        int half_span = (dx > dz ? dx : dz) / 2 + 3;
+        if (half_span > radius) radius = half_span;
+        if (radius > 64) radius = 64;
+    }
+    int r0 = crow - radius, r1 = crow + radius;
+    int c0 = ccol - radius, c1 = ccol + radius;
     if (r0 < 0) r0 = 0;
     if (r1 >= MAP_GRID) r1 = MAP_GRID - 1;
     if (c0 < 0) c0 = 0;
@@ -1157,39 +1177,112 @@ static void build_map_mesh(void) {
 void render_frame_begin(void) {
     if (render_backend != RENDER_HARDWARE) return;
 
+    s_capture_view = 0;
+    s_split_capture = render_split_screen_active();
+    render_view_count = 1;
+    s_ellipsoids = s_ellipsoid_storage[0];
+    s_flat_verts = s_flat_storage[0];
+    s_tex_verts = s_tex_storage[0];
     s_ellipsoid_count = 0;
     s_flat_count      = 0;
     s_tex_count       = 0;
     s_frame_begun     = true;
 
+    memset(&render_frame, 0, sizeof(render_frame));
     build_view_matrix(render_frame.view);
-    build_proj_matrix(render_frame.proj);
+    build_proj_matrix(render_frame.proj, s_split_capture);
     render_frame.moving_camera = moving_camera;
 
-    if (render_map3d) build_map_mesh();
+    /* One map mesh centred between both players keeps their two camera views
+     * inside the same loaded map neighbourhood. */
+    if (render_map3d) {
+        int16_t saved_x = view_pos.X, saved_z = view_pos.Z;
+        if (s_split_capture && coop_players[0].actor && coop_players[1].actor) {
+            view_pos.X = (int16_t)(((int)coop_players[0].actor->position_vector.X +
+                                    (int)coop_players[1].actor->position_vector.X) / 2);
+            view_pos.Z = (int16_t)(((int)coop_players[0].actor->position_vector.Z +
+                                    (int)coop_players[1].actor->position_vector.Z) / 2);
+        }
+        build_map_mesh();
+        view_pos.X = saved_x;
+        view_pos.Z = saved_z;
+    }
     render_frame.map_verts = render_map3d ? s_map_verts : NULL;
     render_frame.map_count = render_map3d ? s_map_count : 0;
     render_frame.map_ells = render_map3d ? s_veg_front->v : NULL;
     render_frame.map_ell_count = render_map3d ? s_veg_front->n : 0;
     render_frame.map_gen = s_map_gen;
 
+    render_views[0] = render_frame;
     render_gl_frame_begin();
+}
+
+bool render_split_screen_active(void) {
+    if (!coop_enabled() || net_is_active() || coop_num_players < 2 ||
+        !coop_players[0].active || !coop_players[1].active ||
+        !coop_players[0].actor || !coop_players[1].actor ||
+        render_backend != RENDER_HARDWARE || !render_map3d)
+        return false;
+
+    /* Need a valid active camera for P1 to even start the split */
+    if (selected_camera <= 0 || selected_camera >= 1200)
+        return false;
+
+    int camera_index = selected_camera;
+    int elem = find_map_element(&coop_players[1].actor->position_vector);
+    if (elem >= 0 && elem < 60000 && map_elements[elem].camera_index > 0)
+        camera_index = map_elements[elem].camera_index;
+    return camera_index > 0 && camera_index < 1200;
+}
+
+static void finish_render_view(int index) {
+    render_frame.ellipsoids = s_ellipsoids;
+    render_frame.ellipsoid_count = s_ellipsoid_count;
+    render_frame.flat_verts = s_flat_verts;
+    render_frame.flat_count = s_flat_count;
+    render_frame.tex_verts = s_tex_verts;
+    render_frame.tex_count = s_tex_count;
+    render_frame.have_3d = s_frame_begun;
+    render_views[index] = render_frame;
+}
+
+void render_frame_next_view(void) {
+    if (render_backend != RENDER_HARDWARE || !s_split_capture || s_capture_view != 0)
+        return;
+
+    finish_render_view(0);
+    s_capture_view = 1;
+    render_view_count = 2;
+    s_ellipsoids = s_ellipsoid_storage[1];
+    s_flat_verts = s_flat_storage[1];
+    s_tex_verts = s_tex_storage[1];
+    s_ellipsoid_count = 0;
+    s_flat_count = 0;
+    s_tex_count = 0;
+
+    render_frame = render_views[0];
+    build_view_matrix(render_frame.view);
+    build_proj_matrix(render_frame.proj, true);
+    render_frame.moving_camera = moving_camera;
+    render_frame.ellipsoids = NULL;
+    render_frame.ellipsoid_count = 0;
+    render_frame.flat_verts = NULL;
+    render_frame.flat_count = 0;
+    render_frame.tex_verts = NULL;
+    render_frame.tex_count = 0;
 }
 
 void render_frame_end(void) {
     if (render_backend != RENDER_HARDWARE) return;
 
-    render_frame.ellipsoids      = s_ellipsoids;
-    render_frame.ellipsoid_count = s_ellipsoid_count;
-    render_frame.flat_verts      = s_flat_verts;
-    render_frame.flat_count      = s_flat_count;
-    render_frame.tex_verts       = s_tex_verts;
-    render_frame.tex_count       = s_tex_count;
-    render_frame.have_3d         = s_frame_begun;
+    finish_render_view(s_capture_view);
+    render_frame = render_views[0];
 
     render_gl_frame_end();
 
     s_frame_begun = false;
+    s_split_capture = false;
+    render_view_count = 1;
 }
 
 /* ── Lifecycle ────────────────────────────────────────────── */

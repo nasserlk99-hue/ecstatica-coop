@@ -15,6 +15,7 @@
 /* view_transform's near-clip test; depth fits the engine's int16 mask. */
 #define RENDER_NEAR_Z   128
 #define RENDER_FAR_Z    32767
+#define RENDER_MAX_VIEWS 2
 
 enum {
     RENDER_ELL_SOLID = 0,
@@ -84,6 +85,8 @@ typedef struct {
 } render_frame_t;
 
 extern render_frame_t render_frame;
+extern render_frame_t render_views[RENDER_MAX_VIEWS];
+extern int render_view_count;
 
 /* ── Backend interface ────────────────────────────────────── */
 

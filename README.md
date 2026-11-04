@@ -60,6 +60,14 @@ The goal is a single native executable that runs both games on modern systems (m
 * Fixed-point math: 14-bit fraction (`FIXED_POINT_SHIFT`)
 * Structs packed to original binary layout (`#pragma pack(push, 1)`)
 
+## Local co-op split view
+
+When both local players are active, side-by-side split view is available with
+the **Hardware** renderer and **3D Map** enabled in the Enhanced menu. Each half
+uses the camera assigned to that player's map position. The pre-rendered
+background mode remains single-camera. Online sessions keep one full-screen
+view per computer.
+
 ## Build
 
 ```bash

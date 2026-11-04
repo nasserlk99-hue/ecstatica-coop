@@ -599,6 +599,13 @@ bool platform_pump_events(platform_t *p) {
 
     memcpy(p->key_prev, p->key_state, sizeof(p->key_prev));
 
+    /* Sync Alt key state with GetAsyncKeyState() to avoid stuck keys when
+     * Windows swallows WM_SYSKEYUP (e.g., Alt-tap activates the menu bar). */
+    p->key_state[PKEY_LALT] = (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
+    p->key_state[PKEY_LCTRL] = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
+    p->key_state[PKEY_LSHIFT] = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+    p->key_state[PKEY_SPACE] = (GetAsyncKeyState(VK_SPACE) & 0x8000) != 0;
+
     MSG msg;
     while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
         TranslateMessage(&msg);

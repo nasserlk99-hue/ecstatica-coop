@@ -7,6 +7,7 @@
 
 #include "win.h"
 #include "platform.h"
+#include "net.h"
 #include "tools/viewer.h"
 #include "layout.h"
 #include "compat.h"
@@ -179,6 +180,17 @@ int main(int argc, char *argv[]) {
             viewer_mode = VIEWER_POINTCLOUD;
         else if (strcmp(argv[i], "--images") == 0)
             viewer_mode = VIEWER_IMAGES;
+    }
+
+    /* Online co-op: parse --host <port> / --join <ip>[:port] */
+    net_init();
+    net_parse_args(argc, argv);
+    if (net_state.host_ip[0]) {
+        if (!net_join(net_state.host_ip, net_state.host_port ? net_state.host_port : NET_PORT_DEFAULT))
+            fprintf(stderr, "[NET] join failed\n");
+    } else if (net_state.host_requested) {
+        if (!net_start_host(net_state.port ? net_state.port : NET_PORT_DEFAULT))
+            fprintf(stderr, "[NET] host failed on %d\n", net_state.port);
     }
     signal(SIGSEGV, crash_handler);
     /* SIGBUS is POSIX; neither Win32 nor DOS defines it. */

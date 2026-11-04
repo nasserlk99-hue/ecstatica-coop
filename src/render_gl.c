@@ -786,12 +786,10 @@ void render_gl_frame_begin(void) {
     glDepthMask(GL_TRUE);
     glDisable(GL_BLEND);
 
-    if (render_map3d) {
-        draw_map3d();
-    } else {
-        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-        glClearDepth(1.0);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClearDepth(1.0);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    if (!render_map3d) {
         draw_background();
     }
     G.have_scene = true;
@@ -859,9 +857,28 @@ static void maybe_dump_frame(void) {
 void render_gl_frame_end(void) {
     if (!G.active) return;
 
-    if (render_frame.have_3d) {
-        glBindFramebuffer(GL_FRAMEBUFFER, G.scene_fbo);
-        glViewport(0, 0, G.scene_w, G.scene_h);
+    glBindFramebuffer(GL_FRAMEBUFFER, G.scene_fbo);
+    int views = render_view_count;
+    if (views < 1) views = 1;
+    if (views > RENDER_MAX_VIEWS) views = RENDER_MAX_VIEWS;
+    int view_w = G.scene_w / views;
+
+    for (int i = 0; i < views; i++) {
+        render_frame = render_views[i];
+        int x = i * view_w;
+        int w = (i == views - 1) ? G.scene_w - x : view_w;
+        glViewport(x, 0, w, G.scene_h);
+        if (render_map3d) {
+            glEnable(GL_SCISSOR_TEST);
+            glScissor(x, 0, w, G.scene_h);
+            glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+            glClearDepth(1.0);
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+            glDisable(GL_SCISSOR_TEST);
+            draw_map3d();
+        }
+
+        if (!render_frame.have_3d) continue;
         glEnable(GL_DEPTH_TEST);
         glDepthMask(GL_TRUE);
 
@@ -879,11 +896,13 @@ void render_gl_frame_end(void) {
         draw_ellipsoids_modulated(RENDER_ELL_BEAM);
 
         if (debug_verbose >= 2) {
-            DBG_LOG(2, "[GL] frame cam=%d ell=%d flat=%d tex=%d\n",
-                    (int)selected_camera, render_frame.ellipsoid_count,
+            DBG_LOG(2, "[GL] view=%d cam=%d ell=%d flat=%d tex=%d\n",
+                    i, (int)selected_camera, render_frame.ellipsoid_count,
                     render_frame.flat_count / 3, render_frame.tex_count / 3);
         }
     }
+
+    render_frame = render_views[0];
 
     /* A flip with no new 3D re-presents the scene target: present_delay and
      * the menus flip without prepare_parts during camera changes. The full

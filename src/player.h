@@ -52,6 +52,11 @@ void coop_on_hero_restored(actor_t *hero);
 bool coop_is_player_actor(const actor_t *actor);
 bool coop_is_player2_actor(const actor_t *actor);
 
+/* Temporarily select player 2's map camera for the second hardware render
+ * pass. These functions do not change selected_thing or run game logic. */
+bool coop_split_view_begin_player2(void);
+void coop_split_view_end_player2(void);
+
 /* Install/restore the engine key globals for one player's behaviour pass.
  * begin returns true when globals were swapped and end must be called. */
 bool coop_begin_actor_input(actor_t *actor);

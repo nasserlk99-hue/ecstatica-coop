@@ -22,8 +22,11 @@
 #include "edit.h"
 #include "game.h"
 #include "init.h"
+#include "map.h"
 #include "menu.h"
+#include "net.h"
 #include "platform.h"
+#include "render.h"
 #include "topo.h"
 #include "win.h"
 #include <stdint.h>
@@ -36,6 +39,14 @@ int coop_num_players = 0;
 static bool spawn_pending;
 static bool remove_pending;
 static bool input_swapped;
+static bool split_camera_saved;
+static int16_t p2_camera_index = -1;
+static struct {
+    camera_data_t *active;
+    int16_t selected;
+    int32_t zoom;
+    vector_t pos, rot;
+} split_camera;
 
 static actor_t *saved_selected;
 static struct {
@@ -82,6 +93,49 @@ bool coop_is_player_actor(const actor_t *actor) {
 
 bool coop_is_player2_actor(const actor_t *actor) {
     return actor && coop_players[1].active && coop_players[1].actor == actor;
+}
+
+bool coop_split_view_begin_player2(void) {
+    if (!coop_enabled() || net_is_active() || coop_num_players < 2 || !coop_players[1].active ||
+        !coop_players[1].actor || render_backend != RENDER_HARDWARE ||
+        !render_map3d || split_camera_saved)
+        return false;
+
+    /* Disable split screen in software renderer mode. It only works with the
+     * 3D map + hardware renderer. */
+    if (render_backend != RENDER_HARDWARE || !render_map3d)
+        return false;
+
+    int camera_index = (p2_camera_index > 0) ? p2_camera_index : selected_camera;
+    int elem = find_map_element(&coop_players[1].actor->position_vector);
+    if (elem >= 0 && elem < 60000) {
+        int p2_camera = map_elements[elem].camera_index;
+        if (p2_camera > 0 && p2_camera < 1200)
+            camera_index = p2_camera;
+    }
+    if (camera_index <= 0 || camera_index >= 1200) return false;
+
+    split_camera.active = active_camera;
+    split_camera.selected = selected_camera;
+    split_camera.zoom = zoom_factor;
+    copy_vector(&split_camera.pos, &view_pos);
+    copy_vector(&split_camera.rot, &view_rot);
+    split_camera_saved = true;
+
+    selected_camera = (int16_t)camera_index;
+    switch_camera(&camera[camera_index]);
+    return true;
+}
+
+void coop_split_view_end_player2(void) {
+    if (!split_camera_saved) return;
+    active_camera = split_camera.active;
+    selected_camera = split_camera.selected;
+    zoom_factor = split_camera.zoom;
+    copy_vector(&view_pos, &split_camera.pos);
+    copy_vector(&view_rot, &split_camera.rot);
+    calculate_view_matrices();
+    split_camera_saved = false;
 }
 
 static int16_t direction_index(const player_input_t *in) {
@@ -131,7 +185,7 @@ static void capture_player1_input(void) {
         in->right = d_down;
         in->use = space;
         in->run = left_ctrl;
-        in->alt = alt_pressed || platform_key_down(p1p, PKEY_LALT);
+        in->alt = platform_key_down(p1p, PKEY_LALT);
         in->jump = left_shift;
         in->pickup_left = e_down;
         in->pickup_right = f_down;
@@ -171,9 +225,55 @@ static void capture_player1_input(void) {
     }
 }
 
+static unsigned input_to_bits(const player_input_t *in) {
+    unsigned b = 0;
+    if (in->up) b |= 1u << 0;
+    if (in->down) b |= 1u << 1;
+    if (in->left) b |= 1u << 2;
+    if (in->right) b |= 1u << 3;
+    if (in->use) b |= 1u << 4;
+    if (in->run) b |= 1u << 5;
+    if (in->alt) b |= 1u << 6;
+    if (in->jump) b |= 1u << 7;
+    if (in->pickup_left) b |= 1u << 8;
+    if (in->pickup_right) b |= 1u << 9;
+    if (in->swing_left) b |= 1u << 10;
+    if (in->swing_right) b |= 1u << 11;
+    return b;
+}
+
+static void bits_to_input(unsigned b, player_input_t *in) {
+    memset(in, 0, sizeof(*in));
+    in->up = (b & (1u << 0)) != 0;
+    in->down = (b & (1u << 1)) != 0;
+    in->left = (b & (1u << 2)) != 0;
+    in->right = (b & (1u << 3)) != 0;
+    in->use = (b & (1u << 4)) != 0;
+    in->run = (b & (1u << 5)) != 0;
+    in->alt = (b & (1u << 6)) != 0;
+    in->jump = (b & (1u << 7)) != 0;
+    in->pickup_left = (b & (1u << 8)) != 0;
+    in->pickup_right = (b & (1u << 9)) != 0;
+    in->swing_left = (b & (1u << 10)) != 0;
+    in->swing_right = (b & (1u << 11)) != 0;
+}
+
 static void poll_player2_input(void) {
     player_input_t *in = &coop_players[1].input;
     memset(in, 0, sizeof(*in));
+
+    if (net_is_active() && net_mode() == NET_HOST) {
+        /* Host: P2 input comes from the network (remote client) */
+        bits_to_input(net_state.last_input_bits, in);
+        return;
+    } else if (net_is_active() && net_mode() == NET_CLIENT) {
+        /* Client: local keyboard still drives local player, but we mirror
+         * host's world; P2 here is the host's puppet, not local input */
+        /* Fall through to local input for client P1? Actually client P1 is
+         * local input, P2 is mirrored puppet. So for client, P2 input is
+         * not local - it comes from host state. Return empty. */
+        return;
+    }
 
     platform_t *p = win_platform();
     if (!p) return;
@@ -438,6 +538,7 @@ void coop_reset_game(void) {
     spawn_pending = false;
     remove_pending = false;
     input_swapped = false;
+    split_camera_saved = false;
 
     /* A menuless autostart (no intro) should still get player 2 as soon as
      * the game loop begins. */
@@ -445,13 +546,21 @@ void coop_reset_game(void) {
 }
 
 void coop_frame_update(void) {
+    /* Restore selected_thing to P1 if it was changed to P2 in the previous
+     * frame for camera purposes. */
+    if (coop_players[0].actor && selected_thing != coop_players[0].actor &&
+        (selected_thing == coop_players[1].actor)) {
+        selected_thing = coop_players[0].actor;
+    }
+
+    /* Ensure input is never left swapped from a previous frame, even when
+     * coop is enabled. A missed coop_end_actor_input() (e.g. from an early
+     * return or a skipped behaviour pass) would otherwise leave P2's key
+     * state in the engine globals, making P1 appear stuck pressing keys. */
+    if (input_swapped)
+        coop_end_actor_input();
+
     if (!coop_enabled()) {
-        /* Terminal states call coop_frame_update() while the keys are still
-         * swapped to player 2 (e.g. a menu/quit path returns without
-         * coop_end_actor_input). Restore them so the next thing that reads the
-         * engine globals can't observe P2's input. */
-        if (input_swapped)
-            coop_end_actor_input();
         return;
     }
 
@@ -471,6 +580,24 @@ void coop_frame_update(void) {
         spawn_pending = true;
     }
 
+    /* Camera: make the shared camera follow P2 when P2 is not in P1's zone. */
+    if (coop_players[1].active && coop_players[1].actor && selected_thing) {
+        int p2_elem = find_map_element(&coop_players[1].actor->position_vector);
+        int p1_elem = find_map_element(&selected_thing->position_vector);
+        if (p2_elem >= 0 && p1_elem >= 0) {
+            int p2_cam = map_elements[p2_elem].camera_index;
+            int p1_cam = map_elements[p1_elem].camera_index;
+            if (p2_cam > 0 && p2_cam < 1200 && p2_cam != p1_cam) {
+                bool p2_moving = coop_players[1].input.up || coop_players[1].input.down ||
+                                 coop_players[1].input.left || coop_players[1].input.right;
+                /* Follow P2 whenever P2 moves */
+                if (p2_moving) {
+                    selected_thing = coop_players[1].actor;
+                }
+            }
+        }
+    }
+
     capture_player1_input();
     poll_player2_input();
 
@@ -485,4 +612,43 @@ void coop_frame_update(void) {
 
     if (spawn_pending && !intro_flag && coop_players[0].actor)
         spawn_player2();
+
+    /* Track P2's camera index so split-screen view follows P2's movement. */
+    if (coop_players[1].active && coop_players[1].actor) {
+        int elem = find_map_element(&coop_players[1].actor->position_vector);
+        if (elem >= 0 && elem < 60000) {
+            int cam = map_elements[elem].camera_index;
+            if (cam > 0 && cam < 1200)
+                p2_camera_index = (int16_t)cam;
+        }
+    }
+
+    /* NOTE: selected_thing may have been changed to P2 above for camera
+     * purposes. We do NOT restore it here — the render pass (check_camera)
+     * needs to see the current selected_thing. It is restored at the start
+     * of the next coop_frame_update() call. */
+
+    /* Network: after local input is captured, push it to host (client) or
+     * pull host state (client) / broadcast (host). */
+    if (net_is_active()) {
+        if (net_mode() == NET_HOST) {
+            net_broadcast_state(game_time);
+        } else if (net_mode() == NET_CLIENT) {
+            net_send_input(input_to_bits(&coop_players[0].input));
+            /* Client puppet interpolation: if host sent puppet pos, smooth
+             * towards it instead of snapping (reduces jitter on lossy links). */
+            if (net_state.connected && coop_players[1].actor) {
+                actor_t *pup = coop_players[1].actor;
+                int tx = net_state.puppet_x, ty = net_state.puppet_y, tz = net_state.puppet_z;
+                /* 1/4 step per frame ≈ 150 ms smoothing at 60 Hz. */
+                pup->position_vector.X = (int16_t)(pup->position_vector.X + (tx - pup->position_vector.X) / 4);
+                pup->position_vector.Y = (int16_t)(pup->position_vector.Y + (ty - pup->position_vector.Y) / 4);
+                pup->position_vector.Z = (int16_t)(pup->position_vector.Z + (tz - pup->position_vector.Z) / 4);
+                pup->rotate_vector.X = (int16_t)(pup->rotate_vector.X + (net_state.puppet_rx - pup->rotate_vector.X) / 4);
+                pup->rotate_vector.Y = (int16_t)(pup->rotate_vector.Y + (net_state.puppet_ry - pup->rotate_vector.Y) / 4);
+                pup->rotate_vector.Z = (int16_t)(pup->rotate_vector.Z + (net_state.puppet_rz - pup->rotate_vector.Z) / 4);
+            }
+        }
+        net_frame_update();
+    }
 }
