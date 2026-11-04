@@ -164,6 +164,13 @@ void setup(void) {
         return;
     }
 
+    /* Demo/QA: the engine's original demo mode auto-presses Space while the
+     * intro is active, so a test run reaches gameplay without synthetic input.
+     * Off unless ECSTATICA_DEMO is set to a non-zero value. */
+    const char *demo_env = getenv("ECSTATICA_DEMO");
+    if (demo_env && *demo_env && *demo_env != '0')
+        demo_option = 1;
+
     /* setup_41007C clears bitmap[0] to 0 here, not bitmap[2], which holds the
      * background check_view loaded. */
     start_game_medium(0, 0);

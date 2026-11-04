@@ -279,16 +279,36 @@ platform_t *platform_init(const char *title, int fb_width, int fb_height, int sc
     int win_w = fb_width * scale;
     int win_h = fb_height * scale;
 
+    /* Borderless by default for the co-op build: no caption, no borders, the
+     * window fills the primary monitor (borderless windowed fullscreen). Set
+     * ECSTATICA_BORDERLESS=0 to get the classic bordered window instead. */
+    const char *bl_env = getenv("ECSTATICA_BORDERLESS");
+    bool borderless = !(bl_env && *bl_env == '0');
+
     /* Assigned: Open Watcom only accepts constant aggregate initialisers. */
     RECT rc;
-    DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
-    rc.left = 0; rc.top = 0; rc.right = win_w; rc.bottom = win_h;
-    AdjustWindowRect(&rc, style, FALSE);
+    DWORD style;
+    int pos_x, pos_y, wnd_w, wnd_h;
+    if (borderless) {
+        style = WS_POPUP | WS_VISIBLE;
+        wnd_w = GetSystemMetrics(SM_CXSCREEN);
+        wnd_h = GetSystemMetrics(SM_CYSCREEN);
+        pos_x = 0;
+        pos_y = 0;
+    } else {
+        style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
+        rc.left = 0; rc.top = 0; rc.right = win_w; rc.bottom = win_h;
+        AdjustWindowRect(&rc, style, FALSE);
+        wnd_w = rc.right - rc.left;
+        wnd_h = rc.bottom - rc.top;
+        pos_x = CW_USEDEFAULT;
+        pos_y = CW_USEDEFAULT;
+    }
 
     p->hwnd = CreateWindowExA(
         0, "EcstaticaWnd", title, style,
-        CW_USEDEFAULT, CW_USEDEFAULT,
-        rc.right - rc.left, rc.bottom - rc.top,
+        pos_x, pos_y,
+        wnd_w, wnd_h,
         NULL, NULL, GetModuleHandleA(NULL), NULL
     );
 
@@ -676,7 +696,8 @@ static int16_t neg_axis(int v) {
 
 /* Win9x: joyGetPosEx axes are normalised against the driver's declared range,
  * and Y is inverted to match XInput. */
-void platform_gamepad_poll(platform_t *p, platform_gamepad_state_t *state) {
+bool platform_gamepad_poll_index(platform_t *p, int index,
+                                 platform_gamepad_state_t *state) {
     JOYCAPS  caps;
     JOYINFOEX ji;
     DWORD    b;
@@ -684,14 +705,16 @@ void platform_gamepad_poll(platform_t *p, platform_gamepad_state_t *state) {
     memset(state, 0, sizeof(*state));
     (void)p;
 
-    if (joyGetDevCaps(JOYSTICKID1, &caps, sizeof(caps)) != JOYERR_NOERROR)
-        return;
+    if (index < 0 || index > 1) return false;
+    UINT id = (UINT)(JOYSTICKID1 + index);
+    if (joyGetDevCaps(id, &caps, sizeof(caps)) != JOYERR_NOERROR)
+        return false;
 
     memset(&ji, 0, sizeof(ji));
     ji.dwSize  = sizeof(ji);
     ji.dwFlags = JOY_RETURNALL;
-    if (joyGetPosEx(JOYSTICKID1, &ji) != JOYERR_NOERROR)
-        return;
+    if (joyGetPosEx(id, &ji) != JOYERR_NOERROR)
+        return false;
 
     state->connected = true;
 
@@ -725,16 +748,24 @@ void platform_gamepad_poll(platform_t *p, platform_gamepad_state_t *state) {
     state->btn_start  = (b & 0x200) != 0;
     state->btn_lstick = (b & 0x400) != 0;
     state->btn_rstick = (b & 0x800) != 0;
+    return true;
+}
+
+void platform_gamepad_poll(platform_t *p, platform_gamepad_state_t *state) {
+    platform_gamepad_poll_index(p, 0, state);
 }
 
 #else
 
-void platform_gamepad_poll(platform_t *p, platform_gamepad_state_t *state) {
+bool platform_gamepad_poll_index(platform_t *p, int index,
+                                 platform_gamepad_state_t *state) {
     memset(state, 0, sizeof(*state));
     (void)p;
 
+    if (index < 0 || index > 3) return false;
+
     XINPUT_STATE xs;
-    if (XInputGetState(0, &xs) != ERROR_SUCCESS) return;
+    if (XInputGetState((DWORD)index, &xs) != ERROR_SUCCESS) return false;
 
     state->connected = true;
     WORD b = xs.Gamepad.wButtons;
@@ -761,6 +792,11 @@ void platform_gamepad_poll(platform_t *p, platform_gamepad_state_t *state) {
     state->btn_select = (b & XINPUT_GAMEPAD_BACK) != 0;
     state->btn_lstick = (b & XINPUT_GAMEPAD_LEFT_THUMB) != 0;
     state->btn_rstick = (b & XINPUT_GAMEPAD_RIGHT_THUMB) != 0;
+    return true;
+}
+
+void platform_gamepad_poll(platform_t *p, platform_gamepad_state_t *state) {
+    platform_gamepad_poll_index(p, 0, state);
 }
 
 #endif /* __WATCOMC__ */

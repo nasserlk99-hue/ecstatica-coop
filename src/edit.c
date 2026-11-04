@@ -16,6 +16,7 @@
 #include "menu.h"
 #include "move.h"
 #include "music.h"
+#include "player.h"
 #include "topo.h"
 #include "platform.h"
 #include <string.h>
@@ -484,6 +485,7 @@ void make_thing(void) {
         /* get_mouse pumps the platform events, as in the original. */
         get_mouse();
         get_joystick();
+        coop_frame_update();
 
         do_movement();
 

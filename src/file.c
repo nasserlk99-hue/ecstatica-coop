@@ -19,6 +19,7 @@
 #include "prof.h"
 #include "move.h"
 #include "music.h"
+#include "player.h"
 #include "req.h"
 #include "topo.h"
 #include "platform.h"
@@ -2148,8 +2149,10 @@ void save_game(int slot) {
     fwrite(pre_menu_thumbnail, 1, THUMB_W * THUMB_H, f);
 
     /* 4. Actor hierarchy as events */
-    for (actor_t *actor = root_thing; actor; actor = actor->next_in_display_list)
+    for (actor_t *actor = root_thing; actor; actor = actor->next_in_display_list) {
+        if (coop_is_player2_actor(actor)) continue;
         save_game_thing(actor, f);
+    }
     put_event(f, 0, NO_EVENT, 0, 0, 0);
 
     /* 5. Repertoire list (only reps with use_flag & 2) */
@@ -2166,6 +2169,7 @@ void save_game(int slot) {
 
     /* 7. Per-thing runtime state */
     for (actor_t *actor = root_thing; actor; actor = actor->next_in_display_list) {
+        if (coop_is_player2_actor(actor)) continue;
         int16_t idx = actor->name_index;
         putwLoHi(idx, f);
         putwLoHi(actor->actor_behavior, f);
@@ -2223,6 +2227,7 @@ void save_game(int slot) {
 
     /* 8. Sync actor runtime state to per-actor arrays */
     for (actor_t *actor = root_thing; actor; actor = actor->next_in_display_list) {
+        if (coop_is_player2_actor(actor)) continue;
         int idx = actor->name_index;
         if (idx >= 0 && idx < THING_TAB_SIZE) {
             actor_position[idx] = actor->position_vector;
@@ -2637,6 +2642,7 @@ void load_game(int slot) {
     if (!have_female && game_version == GAME_VERSION_E1 && selected_thing
         && (selected_thing->name_index == 0 || selected_thing->name_index == 1))
         female = selected_thing->name_index == 1;
+    coop_on_hero_restored(selected_thing);
     no_wanderers = false;
     intro_flag = false;
     remove_all_graphics();

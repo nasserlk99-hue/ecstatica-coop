@@ -13,6 +13,7 @@ set(C_SRCS
     game.c
     file.c
     move.c
+    player.c
     menu.c
     req.c
     music.c

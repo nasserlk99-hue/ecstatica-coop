@@ -44,6 +44,10 @@ enum {
     PKEY_C      = 0x2E,
     PKEY_M      = 0x32,
     PKEY_Z      = 0x2C,
+    PKEY_J      = 0x24,
+    PKEY_K      = 0x25,
+    PKEY_U      = 0x16,
+    PKEY_Y      = 0x15,
     PKEY_LCTRL  = 0x1D,
     PKEY_LALT   = 0x38,
     PKEY_LSHIFT = 0x2A,
@@ -57,6 +61,10 @@ enum {
     PKEY_NUM7   = 0x47,
     PKEY_NUM8   = 0x48,
     PKEY_NUM9   = 0x49,
+    PKEY_NUM0   = 0x52,
+    PKEY_NUMDEC = 0x53,
+    PKEY_NUMPLUS= 0x4E,
+    PKEY_NUMMINUS=0x4A,
     PKEY_1      = 0x02,
     PKEY_2      = 0x03,
     PKEY_3      = 0x04,
@@ -169,6 +177,12 @@ typedef struct {
 
 /* First connected gamepad; all zero when none is connected. */
 void platform_gamepad_poll(platform_t *p, platform_gamepad_state_t *state);
+
+/* Gamepad by index (0 is the same pad platform_gamepad_poll returns). Used by
+ * local co-op for player 2. Backends without multi-pad support return false
+ * for index > 0 and zero the state. */
+bool platform_gamepad_poll_index(platform_t *p, int index,
+                                 platform_gamepad_state_t *state);
 
 void platform_set_title(platform_t *p, const char *title);
 

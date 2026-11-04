@@ -29,6 +29,20 @@
 #include <mach-o/dyld.h>
 #endif
 
+#ifndef _WIN32
+/* Backends without multi-pad support expose only pad 0. Windows overrides this
+ * in platforms/windows.c with XInput / winmm indices. */
+bool platform_gamepad_poll_index(platform_t *p, int index,
+                                 platform_gamepad_state_t *state) {
+    if (index != 0) {
+        memset(state, 0, sizeof(*state));
+        return false;
+    }
+    platform_gamepad_poll(p, state);
+    return state->connected;
+}
+#endif
+
 /* Directory holding the running executable. Empty string if it can't be
  * determined — every caller treats that as "candidate not available". */
 static void executable_dir(char *buf, size_t bufsz) {

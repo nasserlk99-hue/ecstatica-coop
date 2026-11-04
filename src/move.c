@@ -16,6 +16,7 @@
 #include "map.h"
 #include "menu.h"
 #include "music.h"
+#include "player.h"
 #include "req.h"
 #include "topo.h"
 #include <string.h>
@@ -218,8 +219,14 @@ void do_movement(void) {
                 }
             } else {
                 actor->flags &= 0xFF7F;
-                if (actor->actor_behavior != BH_EXTERNAL)
+                if (actor->actor_behavior != BH_EXTERNAL) {
+                    /* Player 2 gets the key globals for this pass only; see
+                     * player.c. Player 1 uses the globals window_proc filled. */
+                    bool swapped = coop_begin_actor_input(actor);
                     behaviour(actor, local_game_time);
+                    if (swapped)
+                        coop_end_actor_input();
+                }
             }
 
             if (break_do_movement)

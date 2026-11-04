@@ -18,6 +18,7 @@
 #include "menu.h"
 #include "move.h"
 #include "music.h"
+#include "player.h"
 #include "req.h"
 #include "topo.h"
 #include "win.h"
@@ -1294,6 +1295,7 @@ void do_execute_code(code_t *code, actor_t *actor) {
                 selected_thing = thing_tab[actor_index];
                 if (selected_thing)
                     selected_thing->actor_behavior = BH_JOYSTICK;
+                coop_on_hero_loaded(actor_index);
             }
             break;
         }
@@ -2322,6 +2324,7 @@ void set_action_load_tried(int16_t index, bool tried) {
 /* menu_initialise_game_43A1FC — full game state reset */
 void initialise_game(void) {
     new_game();
+    coop_reset_game();
     free_all_heaps();
 
     root_thing = NULL;
@@ -4039,6 +4042,31 @@ void check_actor_loaded_by_index(int16_t actor_index) {
         }
     }
     selected_thing = save;
+}
+
+/* coop_load_actor_instance — load one more copy of an already loaded thing.
+ * The loader keys everything off thing_tab[name_index] and a load-tried flag,
+ * so both are parked while the copy is read. The table slot is then put back
+ * on the original; the copy is in the world and in the display list, but only
+ * the player module knows about it. Used for local player 2. */
+actor_t *coop_load_actor_instance(int16_t actor_index) {
+    if (actor_index < 0 || actor_index >= THING_TAB_SIZE) return NULL;
+
+    actor_t *original = thing_tab[actor_index];
+    if (!original) return NULL;
+
+    bool tried = actor_load_tried[actor_index];
+    thing_tab[actor_index] = NULL;
+    actor_load_tried[actor_index] = false;
+
+    check_actor_loaded_by_index(actor_index);
+    actor_t *clone = thing_tab[actor_index];
+
+    thing_tab[actor_index] = original;
+    actor_load_tried[actor_index] = tried;
+
+    if (clone == original) return NULL;
+    return clone;
 }
 
 /* game_check_actor_loaded  E1: 0x44681C | E2: 0x451DF4 */
