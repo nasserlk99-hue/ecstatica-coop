@@ -422,6 +422,13 @@ static void update_player1_follow_mode(void) {
         return;
     }
 
+    /* If both players are idle, let only P2 follow P1 instead of having them
+     * chase each other. */
+    if (idle_follow_due(player2_last_input_time)) {
+        player1_follow_mode = false;
+        return;
+    }
+
     player1_follow_mode = idle_follow_due(player1_last_input_time);
 }
 
