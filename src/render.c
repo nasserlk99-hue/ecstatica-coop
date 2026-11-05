@@ -1218,6 +1218,13 @@ void render_frame_begin(void) {
 }
 
 bool render_split_screen_active(void) {
+    /* Split screen is opt-in: it is off by default. Set
+     * ECSTATICA_SPLIT_SCREEN=1 (and use the hardware renderer + 3D map) to
+     * enable the two-view composite. */
+    const char *ss = getenv("ECSTATICA_SPLIT_SCREEN");
+    if (!ss || !*ss || *ss == '0')
+        return false;
+
     if (!coop_enabled() || net_is_active() || coop_num_players < 2 ||
         !coop_players[0].active || !coop_players[1].active ||
         !coop_players[0].actor || !coop_players[1].actor ||
