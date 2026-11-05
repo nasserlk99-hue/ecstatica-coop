@@ -68,6 +68,10 @@ uses the camera assigned to that player's map position. The pre-rendered
 background mode remains single-camera. Online sessions keep one full-screen
 view per computer.
 
+Player 1 uses WASD and Player 2 uses the arrow keys or numpad for manual play.
+After three seconds without input, either player follows the other automatically;
+any input immediately returns control to that player's keyboard or gamepad.
+
 ## Build
 
 ```bash

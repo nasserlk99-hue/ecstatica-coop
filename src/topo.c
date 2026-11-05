@@ -656,6 +656,8 @@ void widen_background(const char *img, const int16_t *mask) {
     file_read_wide_view(selected_camera, w, bitmap[3], mask_map[2]);
 }
 
+static int load_view_palette_file(int camera);
+
 int load_raw(void) {
     if (selected_camera < 0) {
         do_info_req("Can't load negative camera");
@@ -754,6 +756,11 @@ int load_raw(void) {
     PROF_END(PROF_VISMAP);
     PROF_BEGIN(PROF_PAL);
     load_palette(NULL);
+    /* The E1 install has no per-camera .PAL files or palette offsets; its
+     * palettes sit inside the VIEWS raws. Without this the fallback is an
+     * all-zero colour_map and the whole game renders black. */
+    if (!remaster_layout && game_version == GAME_VERSION_E1)
+        load_view_palette_file(selected_camera);
     PROF_END(PROF_PAL);
     clip_mask(2, 1, 0, 0, screen_width, screen_height);
     clip_mask(2, 0, 0, 0, screen_width, screen_height);
@@ -801,6 +808,35 @@ char *load_raw_graphic(const char *source, int *size_x, int *size_y) {
     fclose(stream);
 
     return result;
+}
+
+/* E1 per-camera palettes live in the low-res VIEWS/NNNN.RAW files: a 32-byte
+ * header followed by 768 bytes of 8-bit RGB. The HIRES files are packed and
+ * carry no palette. E1 presents colour_map (show_parts ignores the fade
+ * palette), so the camera palette belongs there. */
+static int load_view_palette_file(int camera) {
+    char path[64];
+    snprintf(path, sizeof(path), "VIEWS/%04d.RAW", camera);
+    FILE *f = fopen_ci(path, "rb");
+    if (!f) return 0;
+
+    uint8_t header[32];
+    uint8_t pal[768];
+    int ok = fread(header, 1, sizeof(header), f) == sizeof(header) &&
+             fread(pal, 1, sizeof(pal), f) == sizeof(pal) &&
+             header[0] == 'm' && header[1] == 'h';
+    fclose(f);
+    if (!ok) return 0;
+
+    for (int i = 0; i < 256; i++) {
+        colour_map[i].R = (uint8_t)(pal[i * 3 + 0] >> 2);
+        colour_map[i].G = (uint8_t)(pal[i * 3 + 1] >> 2);
+        colour_map[i].B = (uint8_t)(pal[i * 3 + 2] >> 2);
+    }
+    memcpy(view_cmap, colour_map, sizeof(view_cmap));
+    memcpy(fade_cmap, colour_map, sizeof(fade_cmap));
+    DBG_LOG(2, "[PAL] cam=%d palette from %s\n", camera, path);
+    return 1;
 }
 
 /* topo_load_palette  E1: ? | E2: 0x44AD28 */

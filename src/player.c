@@ -24,6 +24,7 @@
 #include "init.h"
 #include "map.h"
 #include "menu.h"
+#include "music.h"
 #include "net.h"
 #include "platform.h"
 #include "render.h"
@@ -40,6 +41,10 @@ static bool spawn_pending;
 static bool remove_pending;
 static bool input_swapped;
 static bool split_camera_saved;
+static bool player1_follow_mode;
+static bool player2_follow_mode;
+static uint32_t player1_last_input_time;
+static uint32_t player2_last_input_time;
 static int16_t p2_camera_index = -1;
 static struct {
     camera_data_t *active;
@@ -54,6 +59,7 @@ static struct {
     char keys[256];
     bool space_pressed, ctrl_pressed, alt_pressed;
     bool key1, key2, key3, key4, key5, key6, key7, key8, key9;
+    bool joystick_control;
     int16_t joystick;
     int16_t joy_button;
 } saved_keys;
@@ -93,6 +99,50 @@ bool coop_is_player_actor(const actor_t *actor) {
 
 bool coop_is_player2_actor(const actor_t *actor) {
     return actor && coop_players[1].active && coop_players[1].actor == actor;
+}
+
+/* Test-only trace: ECSTATICA_COOP_TRACE=1 logs both players' positions,
+ * input flags and first part colour twice a second. Used by the automated
+ * two-player control test; no effect when the variable is unset. */
+static void coop_trace_positions(void) {
+    static int trace = -1;
+    static uint32_t last_trace;
+    if (trace < 0) {
+        const char *e = getenv("ECSTATICA_COOP_TRACE");
+        trace = (e && *e && *e != '0') ? 1 : 0;
+    }
+    if (!trace) return;
+
+    uint32_t now = (uint32_t)my_time();
+    if (last_trace && (uint32_t)(now - last_trace) < (uint32_t)(MY_TIME_PER_SEC / 2))
+        return;
+    last_trace = now;
+
+    actor_t *p1 = coop_players[0].actor;
+    actor_t *p2 = coop_players[1].actor;
+    if (!p1 || !p2) {
+        DBG_LOG(1, "[COOP] trace p1=%p p2=%p active=%d/%d spawn=%d intro=%d\n",
+                (void *)p1, (void *)p2, coop_players[0].active, coop_players[1].active,
+                spawn_pending, intro_flag);
+        return;
+    }
+
+    const player_input_t *i1 = &coop_players[0].input;
+    const player_input_t *i2 = &coop_players[1].input;
+    int c1 = p1->actor_parts_list ? p1->actor_parts_list->color : -1;
+    int c2 = p2->actor_parts_list ? p2->actor_parts_list->color : -1;
+    int sel = (selected_thing == p1) ? 1 : (selected_thing == p2) ? 2 : 0;
+    DBG_LOG(1,
+            "[COOP] trace p1=(%d,%d,%d) p2=(%d,%d,%d) "
+            "in1=%d%d%d%d in2=%d%d%d%d bh1=%d bh2=%d col1=%d col2=%d "
+            "act1=%d act2=%d sel=%d gt=%d\n",
+            p1->position_vector.X, p1->position_vector.Y, p1->position_vector.Z,
+            p2->position_vector.X, p2->position_vector.Y, p2->position_vector.Z,
+            i1->up, i1->down, i1->left, i1->right,
+            i2->up, i2->down, i2->left, i2->right,
+            p1->actor_behavior, p2->actor_behavior, c1, c2,
+            p1->actor_act.act_action != NULL, p2->actor_act.act_action != NULL,
+            sel, game_time);
 }
 
 bool coop_split_view_begin_player2(void) {
@@ -324,6 +374,86 @@ static void poll_player2_input(void) {
     }
 }
 
+static bool player_has_input(const player_input_t *in) {
+    return in->up || in->down || in->left || in->right || in->use || in->run ||
+           in->alt || in->jump || in->pickup_left || in->pickup_right ||
+           in->swing_left || in->swing_right;
+}
+
+static bool idle_follow_due(uint32_t last_input_time) {
+    uint32_t now = (uint32_t)my_time();
+    return (uint32_t)(now - last_input_time) >=
+           3u * (uint32_t)MY_TIME_PER_SEC;
+}
+
+/* Test switch: ECSTATICA_COOP_NO_FOLLOW=1 turns the idle auto-follow off so
+ * a control test measures only the keys that are actually held. */
+static bool coop_follow_disabled(void) {
+    static int disabled = -1;
+    if (disabled < 0) {
+        const char *e = getenv("ECSTATICA_COOP_NO_FOLLOW");
+        disabled = (e && *e && *e != '0') ? 1 : 0;
+    }
+    return disabled != 0;
+}
+
+static void update_player1_follow_mode(void) {
+    if (!coop_players[0].active || !coop_players[0].actor ||
+        !coop_players[1].active || !coop_players[1].actor) {
+        player1_follow_mode = false;
+        return;
+    }
+
+    /* The intro drives the hero from scene scripts; taking over with follow
+     * would fight the scripted movement. */
+    if (intro_flag) {
+        player1_follow_mode = false;
+        return;
+    }
+
+    if (coop_follow_disabled()) {
+        player1_follow_mode = false;
+        return;
+    }
+
+    if (player_has_input(&coop_players[0].input)) {
+        player1_last_input_time = (uint32_t)my_time();
+        player1_follow_mode = false;
+        return;
+    }
+
+    player1_follow_mode = idle_follow_due(player1_last_input_time);
+}
+
+static void update_player2_follow_mode(void) {
+    if (!coop_players[1].active || !coop_players[1].actor) {
+        player2_follow_mode = false;
+        return;
+    }
+
+    /* Player 2 is frozen as BH_EXTERNAL for the intro; never queue follow
+     * while the scene scripts are still in charge. */
+    if (intro_flag) {
+        player2_follow_mode = false;
+        return;
+    }
+
+    if (coop_follow_disabled()) {
+        player2_follow_mode = false;
+        return;
+    }
+
+    uint32_t now = (uint32_t)my_time();
+    if (player_has_input(&coop_players[1].input)) {
+        player2_last_input_time = now;
+        player2_follow_mode = false;
+        return;
+    }
+
+    /* Let P2 walk away from the keys briefly without the AI taking over. */
+    player2_follow_mode = idle_follow_due(player2_last_input_time);
+}
+
 static void install_player_input(const player_input_t *in) {
     memset(extra_keys_pressed, 0, 256);
     memset(keys_pressed, 0, 256);
@@ -359,7 +489,9 @@ static void install_player_input(const player_input_t *in) {
 }
 
 bool coop_begin_actor_input(actor_t *actor) {
-    if (!coop_is_player2_actor(actor)) return false;
+    bool is_player1 = coop_players[0].active && coop_players[0].actor == actor;
+    bool is_player2 = coop_is_player2_actor(actor);
+    if (!is_player2 && !(is_player1 && player1_follow_mode)) return false;
 
     saved_selected = selected_thing;
     memcpy(saved_keys.extra, extra_keys_pressed, sizeof(saved_keys.extra));
@@ -376,11 +508,23 @@ bool coop_begin_actor_input(actor_t *actor) {
     saved_keys.key7 = key7_pressed;
     saved_keys.key8 = key8_pressed;
     saved_keys.key9 = key9_pressed;
+    saved_keys.joystick_control = joystick_control;
     saved_keys.joystick = joystick;
     saved_keys.joy_button = joy_button;
 
-    install_player_input(&coop_players[1].input);
+    install_player_input(is_player1 ? &coop_players[0].input : &coop_players[1].input);
     selected_thing = actor;
+    actor_t *follow_target = is_player1 ? coop_players[1].actor : coop_players[0].actor;
+    bool follow = (is_player1 ? player1_follow_mode : player2_follow_mode) && follow_target &&
+                  actor->actor_behavior != BH_GET_HIT &&
+                  actor->actor_behavior != BH_DYING &&
+                  actor->actor_behavior != BH_DEAD &&
+                  actor->actor_behavior != BH_RECOVERING;
+    joystick_control = !follow;
+    if (follow) {
+        actor->actor_behavior = BH_FOLLOW;
+        actor->interact_target_index = follow_target->name_index;
+    }
     input_swapped = true;
     return true;
 }
@@ -403,6 +547,7 @@ void coop_end_actor_input(void) {
     key7_pressed = saved_keys.key7;
     key8_pressed = saved_keys.key8;
     key9_pressed = saved_keys.key9;
+    joystick_control = saved_keys.joystick_control;
     joystick = saved_keys.joystick;
     joy_button = saved_keys.joy_button;
 
@@ -462,7 +607,10 @@ static void spawn_player2(void) {
         return;
     }
 
-    p2->actor_behavior = BH_JOYSTICK;
+    /* During the intro the hero is scripted (and players may not control him
+     * yet); keep player 2 visible but frozen so he cannot disturb the scene.
+     * coop_frame_update switches him to BH_JOYSTICK at handover. */
+    p2->actor_behavior = intro_flag ? BH_EXTERNAL : BH_JOYSTICK;
     p2->move_type = -1;
     p2->actor_rep_index = p1->actor_rep_index;
     p2->actor_Speed_factor = p1->actor_Speed_factor;
@@ -500,6 +648,8 @@ static void spawn_player2(void) {
     coop_players[1].actor = p2;
     coop_players[1].active = true;
     coop_num_players = 2;
+    player2_last_input_time = (uint32_t)my_time();
+    player2_follow_mode = false;
 
     DBG_LOG(1, "[COOP] player 2 spawned: thing=%d at %d,%d,%d (p1 %d,%d,%d)\n",
             (int)p2->name_index,
@@ -516,6 +666,8 @@ void coop_on_hero_loaded(int16_t hero_index) {
         (hero_index >= 0 && hero_index < THING_TAB_SIZE) ? thing_tab[hero_index] : NULL;
     coop_players[0].active = coop_players[0].actor != NULL;
     coop_num_players = coop_players[0].active ? 1 : 0;
+    player1_last_input_time = (uint32_t)my_time();
+    player1_follow_mode = false;
 
     DBG_LOG(1, "[COOP] hero loaded: index=%d actor=%p\n",
             (int)hero_index, (void *)coop_players[0].actor);
@@ -526,6 +678,8 @@ void coop_on_hero_restored(actor_t *hero) {
     coop_players[0].actor = hero;
     coop_players[0].active = true;
     coop_num_players = 1;
+    player1_last_input_time = (uint32_t)my_time();
+    player1_follow_mode = false;
     spawn_pending = true;
     if (coop_players[1].actor)
         remove_pending = true;
@@ -539,6 +693,10 @@ void coop_reset_game(void) {
     remove_pending = false;
     input_swapped = false;
     split_camera_saved = false;
+    player1_follow_mode = false;
+    player2_follow_mode = false;
+    player1_last_input_time = 0;
+    player2_last_input_time = 0;
 
     /* A menuless autostart (no intro) should still get player 2 as soon as
      * the game loop begins. */
@@ -600,6 +758,14 @@ void coop_frame_update(void) {
 
     capture_player1_input();
     poll_player2_input();
+    update_player1_follow_mode();
+    update_player2_follow_mode();
+
+    /* Manual P1 input always retakes the selected-actor slot, even if the
+     * shared-camera handoff selected P2 on the previous frame. */
+    if (coop_players[0].active &&
+        player_has_input(&coop_players[0].input))
+        selected_thing = coop_players[0].actor;
 
     /* Re-assert player 1's keys. collect_behaviour (get_mouse/window_proc)
      * may run other input readers before the first behaviour pass of the
@@ -610,8 +776,22 @@ void coop_frame_update(void) {
     if (coop_players[0].active)
         install_player_input(&coop_players[0].input);
 
-    if (spawn_pending && !intro_flag && coop_players[0].actor)
+    /* Spawn as soon as the hero exists, including the intro: player 2 should
+     * load with player 1. He stays BH_EXTERNAL (and so ignores input) until
+     * the intro hands control over. */
+    if (spawn_pending && coop_players[0].actor)
         spawn_player2();
+
+    if (coop_players[1].active && coop_players[1].actor &&
+        !intro_flag && coop_players[1].actor->actor_behavior == BH_EXTERNAL) {
+        coop_players[1].actor->actor_behavior = BH_JOYSTICK;
+        /* Start the idle-follow clock at handover, not from the start of the
+         * intro, so neither hero immediately walks off on its own. */
+        player1_last_input_time = (uint32_t)my_time();
+        player2_last_input_time = player1_last_input_time;
+        player1_follow_mode = false;
+        player2_follow_mode = false;
+    }
 
     /* Track P2's camera index so split-screen view follows P2's movement. */
     if (coop_players[1].active && coop_players[1].actor) {
@@ -622,6 +802,8 @@ void coop_frame_update(void) {
                 p2_camera_index = (int16_t)cam;
         }
     }
+
+    coop_trace_positions();
 
     /* NOTE: selected_thing may have been changed to P2 above for camera
      * purposes. We do NOT restore it here — the render pass (check_camera)

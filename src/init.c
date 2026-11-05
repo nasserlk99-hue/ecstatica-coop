@@ -510,6 +510,10 @@ void load_logo(const char *file_name) {
 void load_def_palette(void) {
     FILE *f = fopen_ci("PALLETTE.RAW", "rb");
     if (!f) f = fopen_ci("TITLE_S.RAW", "rb");
+    /* Win95 data ships the 640x480 title as TSCREEN.RAW and has no
+     * PALLETTE.RAW/TITLE_S.RAW; its palette is the only default palette the
+     * install has, so seed colour_map from it instead of leaving it black. */
+    if (!f) f = fopen_ci("TSCREEN.RAW", "rb");
     if (!f) return;
 
     char header[32];

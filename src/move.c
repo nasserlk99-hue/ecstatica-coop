@@ -598,7 +598,15 @@ void behaviour(actor_t *actor, int game_time_arg) {
                 actor->actor_behavior = BH_JOYSTICK;
             interact_actor = NULL;
         } else if (actor->actor_behavior == BH_FOLLOW) {
-            interact_actor = (actor->interact_target_index < 0) ? NULL : thing_tab[actor->interact_target_index];
+            /* Both coop heroes can share a name index, so use their tracked
+             * pointers rather than thing_tab when one follows the other. */
+            if (coop_is_player2_actor(actor) && coop_players[0].active)
+                interact_actor = coop_players[0].actor;
+            else if (coop_players[0].active && actor == coop_players[0].actor &&
+                     coop_players[1].active)
+                interact_actor = coop_players[1].actor;
+            else
+                interact_actor = (actor->interact_target_index < 0) ? NULL : thing_tab[actor->interact_target_index];
         } else {
             interact_actor = NULL;
             for (actor_t *fa = root_thing; fa; fa = fa->next_in_display_list) {
@@ -997,16 +1005,14 @@ have_target:
                 next_move = 48;
                 one_shot_action = 1;
             }
-        } else if (actor->interact_target_index < 0) {
-            next_move = do_wander(actor);
-        } else if (!thing_tab[actor->interact_target_index]) {
+        } else if (!interact_actor) {
             next_move = do_wander(actor);
         } else {
             int16_t dirn, dist;
             dist = target_distance;
             find_dirn_and_dist(&dirn, &dist,
-                thing_tab[actor->interact_target_index]->position_vector.X - actor->position_vector.X,
-                thing_tab[actor->interact_target_index]->position_vector.Z - actor->position_vector.Z);
+                interact_actor->position_vector.X - actor->position_vector.X,
+                interact_actor->position_vector.Z - actor->position_vector.Z);
             dirn = (int16_t)target_direction;
             dist = target_distance;
             int16_t angle_diff = (int16_t)target_direction - actor->rotate_vector.Y;

@@ -1224,6 +1224,11 @@ bool render_split_screen_active(void) {
         render_backend != RENDER_HARDWARE || !render_map3d)
         return false;
 
+    /* The intro is a scripted cinematic with its own camera work; keep the
+     * single view until control is handed over, then split for two players. */
+    if (intro_flag)
+        return false;
+
     /* Need a valid active camera for P1 to even start the split */
     if (selected_camera <= 0 || selected_camera >= 1200)
         return false;

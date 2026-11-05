@@ -77,10 +77,33 @@ void flip_win95(void) {
         static int dump_counter = 0;
         char filename[64];
         snprintf(filename, sizeof(filename), "frame_dump_%03d.ppm", dump_counter++);
+        const uint8_t *pal = (const uint8_t *)view_cmap;
+        const uint8_t *cmap = (const uint8_t *)colour_map;
+        int fb_total = screen_width * screen_height;
+
+        /* Diagnostic: distinguish an empty plane from a zero palette. */
+        int nz_plane = 0, nz_bg = 0, nz_pal = 0, nz_cmap = 0;
+        uint8_t pmin = 255, pmax = 0, idx_max = 0;
+        int pal_max = 0;
+        for (int i = 0; i < fb_total; i++) {
+            uint8_t v = (uint8_t)plane_data[i];
+            if (v) { nz_plane++; if (v < pmin) pmin = v; if (v > pmax) pmax = v; }
+            if (v > idx_max) idx_max = v;
+        }
+        if (bitmap[2])
+            for (int i = 0; i < fb_total; i++)
+                if (bitmap[2][i]) nz_bg++;
+        for (int i = 0; i < 256 * 3; i++) {
+            if (pal[i]) nz_pal++;
+            if (cmap[i]) nz_cmap++;
+            if (pal[i] > pal_max) pal_max = pal[i];
+        }
+        DBG_LOG(1, "[DUMP] plane nz=%d/%d idx=%u..%u pal_nz=%d pal_max=%d cmap_nz=%d bg_nz=%d db=%d bg_status=%d\n",
+                nz_plane, fb_total, pmin, pmax, nz_pal, pal_max, nz_cmap, nz_bg,
+                (int)db, (int)background_status);
+
         FILE *ppm = fopen(filename, "wb");
         if (ppm) {
-            const uint8_t *pal = (const uint8_t *)view_cmap;
-            int fb_total = screen_width * screen_height;
             fprintf(ppm, "P6\n%d %d\n255\n", screen_width, screen_height);
             for (int i = 0; i < fb_total; i++) {
                 uint8_t idx = (uint8_t)plane_data[i];
@@ -94,6 +117,17 @@ void flip_win95(void) {
             }
             fclose(ppm);
             fprintf(stderr, "[DUMP] Saved %s\n", filename);
+        }
+
+        /* Raw palette indices as grayscale, independent of the palette. */
+        char idx_name[64];
+        snprintf(idx_name, sizeof(idx_name), "frame_idx_%03d.pgm", dump_counter - 1);
+        FILE *pgm = fopen(idx_name, "wb");
+        if (pgm) {
+            fprintf(pgm, "P5\n%d %d\n255\n", screen_width, screen_height);
+            fwrite(plane_data, 1, (size_t)fb_total, pgm);
+            fclose(pgm);
+            fprintf(stderr, "[DUMP] Saved %s\n", idx_name);
         }
     }
     f12_was_pressed = f12_now;

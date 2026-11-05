@@ -214,11 +214,17 @@ int main(int argc, char *argv[]) {
 
     /* Fails harmlessly (leaving the log NULL) where the root is read-only.
      * DOS gets an 8.3 name — "ecstatica_debug.log" cannot be created on a FAT
-     * volume, so on that target the log silently never appeared. */
+     * volume, so on that target the log silently never appeared.
+     * ECSTATICA_LOG=<name> gives parallel test runs their own log file. */
 #ifdef __WATCOMC__
     debug_log_file = fopen("ECSTATIC.LOG", "w");
 #else
-    debug_log_file = fopen("ecstatica_debug.log", "w");
+    {
+        const char *log_name = getenv("ECSTATICA_LOG");
+        if (!log_name || !*log_name)
+            log_name = "ecstatica_debug.log";
+        debug_log_file = fopen(log_name, "w");
+    }
 #endif
     if (debug_log_file) {
         setvbuf(debug_log_file, NULL, _IONBF, 0);
