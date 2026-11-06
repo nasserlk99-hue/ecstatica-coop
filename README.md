@@ -28,6 +28,7 @@ play. No game files are tracked here; `data/` is ignored.
 | Interact / pick up | Space | Numpad 5 |
 | Left hand pick up / drop | E | Numpad 1 |
 | Right hand pick up / drop | F | Numpad 3 |
+| Fire (pistol shot) | V | Numpad - |
 | Left swing | R | Numpad 7 |
 | Right swing | C | Numpad 9 |
 | Jump | Left Ctrl | Numpad . |
