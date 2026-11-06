@@ -10,7 +10,7 @@
 typedef struct player_input_s {
     bool up, down, left, right;
     bool use;          /* Space: reach, pick up, confirm */
-    bool run;          /* Ctrl: run / attack with the stick (E2) */
+    bool run;          /* E2: held run key. E1: unused — heroes auto-run */
     bool alt;          /* Alt: use what is held / magic (E2) */
     bool jump;         /* Shift: jump */
     bool pickup_left;  /* E1 Numpad 1 / Z: left hand */
@@ -24,10 +24,18 @@ typedef struct player_s {
     int index;
     actor_t *actor;
     player_input_t input;
+    bool follow_stopped;   /* idle-follow: close enough, waiting for the other */
 } player_t;
 
 extern player_t coop_players[COOP_MAX_PLAYERS];
 extern int coop_num_players;
+
+/* Configurable movement keys (PKEY_* values from platform.h). */
+extern int p1_key_up, p1_key_down, p1_key_left, p1_key_right;
+extern int p2_key_up, p2_key_down, p2_key_left, p2_key_right;
+/* Configurable action keys. */
+extern int p1_key_run, p1_key_jump, p1_key_use;
+extern int p2_key_run, p2_key_jump, p2_key_use;
 
 /* True when this build should offer local co-op. Controlled by
  * ECSTATICA_COOP=0 to disable; on by default. */

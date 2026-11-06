@@ -14,6 +14,7 @@
 #include "init.h"
 #include "menu.h"
 #include "platform.h"
+#include "player.h"
 #include "render.h"
 #include "compat.h"
 #include "prof.h"
@@ -215,7 +216,10 @@ void window_proc(void) {
     extra_keys_pressed[73] = platform_key_down(g_platform, PKEY_NUM9) || platform_key_down(g_platform, PKEY_E);
     extra_keys_pressed[79] = platform_key_down(g_platform, PKEY_NUM1) || platform_key_down(g_platform, PKEY_Z);
     extra_keys_pressed[81] = platform_key_down(g_platform, PKEY_NUM3) || platform_key_down(g_platform, PKEY_C);
-    keys_pressed[42]       = platform_key_down(g_platform, PKEY_LSHIFT);
+    /* Jump flag: scancode 42 is the engine's "Left Shift = jump" slot.
+     * Drive it from the configurable jump key instead of a hard-coded LShift
+     * so remapping (e.g. run on LShift) does not also trigger a jump. */
+    keys_pressed[42]       = platform_key_down(g_platform, p1_key_jump);
 
     static const int fn_pk[12] = { PKEY_F1, PKEY_F2, PKEY_F3, PKEY_F4,
                                     PKEY_F5, PKEY_F6, PKEY_F7, PKEY_F8,

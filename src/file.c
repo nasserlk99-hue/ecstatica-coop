@@ -1981,6 +1981,34 @@ void load_port_settings(void) {
         } else if (sscanf(line, "widescreen = %d", &value) == 1) {
             /* Before aspect_ratio: on meant 16:9. */
             aspect_ratio = value ? ASPECT_16_9 : ASPECT_4_3;
+        } else if (sscanf(line, "p1_up = %d", &value) == 1) {
+            p1_key_up = value;
+        } else if (sscanf(line, "p1_down = %d", &value) == 1) {
+            p1_key_down = value;
+        } else if (sscanf(line, "p1_left = %d", &value) == 1) {
+            p1_key_left = value;
+        } else if (sscanf(line, "p1_right = %d", &value) == 1) {
+            p1_key_right = value;
+        } else if (sscanf(line, "p2_up = %d", &value) == 1) {
+            p2_key_up = value;
+        } else if (sscanf(line, "p2_down = %d", &value) == 1) {
+            p2_key_down = value;
+        } else if (sscanf(line, "p2_left = %d", &value) == 1) {
+            p2_key_left = value;
+        } else if (sscanf(line, "p2_right = %d", &value) == 1) {
+            p2_key_right = value;
+        } else if (sscanf(line, "p1_run = %d", &value) == 1) {
+            p1_key_run = value;
+        } else if (sscanf(line, "p1_jump = %d", &value) == 1) {
+            p1_key_jump = value;
+        } else if (sscanf(line, "p1_use = %d", &value) == 1) {
+            p1_key_use = value;
+        } else if (sscanf(line, "p2_run = %d", &value) == 1) {
+            p2_key_run = value;
+        } else if (sscanf(line, "p2_jump = %d", &value) == 1) {
+            p2_key_jump = value;
+        } else if (sscanf(line, "p2_use = %d", &value) == 1) {
+            p2_key_use = value;
         }
     }
     fclose(f);
@@ -1998,6 +2026,20 @@ void save_port_settings(void) {
     fprintf(f, "map3d = %d\n", (int)render_map3d);
     fprintf(f, "scale_mode = %d\n", (int)display_scale_mode);
     fprintf(f, "aspect_ratio = %s\n", aspect_ratio_name(aspect_ratio));
+    fprintf(f, "p1_up = %d\n", p1_key_up);
+    fprintf(f, "p1_down = %d\n", p1_key_down);
+    fprintf(f, "p1_left = %d\n", p1_key_left);
+    fprintf(f, "p1_right = %d\n", p1_key_right);
+    fprintf(f, "p2_up = %d\n", p2_key_up);
+    fprintf(f, "p2_down = %d\n", p2_key_down);
+    fprintf(f, "p2_left = %d\n", p2_key_left);
+    fprintf(f, "p2_right = %d\n", p2_key_right);
+    fprintf(f, "p1_run = %d\n", p1_key_run);
+    fprintf(f, "p1_jump = %d\n", p1_key_jump);
+    fprintf(f, "p1_use = %d\n", p1_key_use);
+    fprintf(f, "p2_run = %d\n", p2_key_run);
+    fprintf(f, "p2_jump = %d\n", p2_key_jump);
+    fprintf(f, "p2_use = %d\n", p2_key_use);
     fclose(f);
 }
 

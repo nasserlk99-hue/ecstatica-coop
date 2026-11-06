@@ -471,6 +471,25 @@ int16_t do_new_wander(actor_t *actor) {
     return result;
 }
 
+/* Coop teammates use a simpler follow than the NPC interaction behaviour:
+ * the stock BH_FOLLOW walks into its target and keeps going, which makes a
+ * hero sprint past the partner. This returns the follower's player slot when
+ * `actor` is a coop hero and `target` is the other hero. */
+static bool coop_follow_teammate(actor_t *actor, actor_t *target, player_t **self_out) {
+    if (!actor || !target) return false;
+    for (int i = 0; i < COOP_MAX_PLAYERS; i++) {
+        if (coop_players[i].active && coop_players[i].actor == actor) {
+            int other = i ^ 1;
+            if (coop_players[other].active && coop_players[other].actor == target) {
+                if (self_out) *self_out = &coop_players[i];
+                return true;
+            }
+            return false;
+        }
+    }
+    return false;
+}
+
 /* move_behaviour  E1: ? | E2: 0x427554 */
 void behaviour(actor_t *actor, int game_time_arg) {
     if (!actor) return;
@@ -997,11 +1016,52 @@ have_target:
         next_move = do_wander(actor);
         break;
 
-    case BH_FOLLOW:
+    case BH_FOLLOW: {
+        player_t *follower = NULL;
+        if (coop_follow_teammate(actor, interact_actor, &follower)) {
+            /* Stop at a comfortable distance and resume when the partner
+             * moves away; steer with the normal turn/walk actions so the
+             * follower keeps the same run speed as the leader. */
+            int32_t ddx = (int32_t)interact_actor->position_vector.X - actor->position_vector.X;
+            int32_t ddz = (int32_t)interact_actor->position_vector.Z - actor->position_vector.Z;
+            int32_t ddy = (int32_t)interact_actor->position_vector.Y - actor->position_vector.Y;
+            int16_t dx = (int16_t)ddx;
+            int16_t dz = (int16_t)ddz;
+            int32_t dist32 = (abs(dz) < abs(dx)) ? abs(dz) / 2 + abs(dx)
+                                                 : abs(dx) / 2 + abs(dz);
+            if (dist32 > 0x7FFE) dist32 = 0x7FFE;
+            int16_t follow_dist = (int16_t)dist32;
+            int16_t follow_angle = arctan(dx, dz);
+            int16_t follow_diff = (int16_t)(follow_angle - actor->rotate_vector.Y);
+
+            if (abs(ddy) > 768) {
+                next_move = 1000;
+                follower->follow_stopped = true;
+            } else {
+                if (follower->follow_stopped) {
+                    if (follow_dist > 500)
+                        follower->follow_stopped = false;
+                } else if (follow_dist <= 300) {
+                    follower->follow_stopped = true;
+                }
+
+                if (follower->follow_stopped) {
+                    next_move = 1000;
+                } else if (abs(follow_diff) >= 0x3000) {
+                    next_move = (follow_diff >= 0) ? 5 : 3;
+                } else {
+                    next_move = 1;
+                    if (abs(follow_diff) > 0x0400)
+                        turn_actor(actor, (follow_diff >= 0 ? 512 : -512) * game_time_arg);
+                }
+            }
+            break;
+        }
+
         if (actor->actor_reperture && actor->actor_reperture->action_slots[48] >= 0
             && target_distance < 700 && selected_thing) {
             if (abs(selected_thing->rotate_vector.Y - (int16_t)target_direction - 128) < 6144
-                && (extra_keys_pressed[55] || ctrl_pressed || extra_keys_pressed[57] || alt_pressed)) {
+                && (extra_keys_pressed[55] || extra_keys_pressed[57] || alt_pressed)) {
                 next_move = 48;
                 one_shot_action = 1;
             }
@@ -1067,6 +1127,7 @@ have_target:
             }
         }
         break;
+    }
 
     case BH_STOP:
         next_move = 1000;

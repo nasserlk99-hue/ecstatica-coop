@@ -153,6 +153,11 @@ static int win32_scancode(LPARAM lParam, WPARAM wParam) {
             case 0x50: return 0xD0;  /* down */
             case 0x4B: return 0xCB;  /* left */
             case 0x4D: return 0xCD;  /* right */
+            /* Numpad 0 / . / + are extended keys on Windows; without this
+             * they never match PKEY_NUM0 / PKEY_NUMDEC / PKEY_NUMPLUS. */
+            case 0x52: return 0x52;  /* numpad 0 (P2 run) */
+            case 0x53: return 0x53;  /* numpad . (P2 jump) */
+            case 0x4E: return 0x4E;  /* numpad + (P2 alt) */
             default:   return scancode | 0x80;
         }
     }

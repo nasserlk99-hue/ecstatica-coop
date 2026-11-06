@@ -15,6 +15,7 @@
 #include "render.h"
 #include "req.h"
 #include "platform.h"
+#include "player.h"
 #include "win.h"
 #include "asm_f.h"
 #include "icon.h"
@@ -26,6 +27,7 @@ void do_load_menu(void);
 void do_save_menu(void);
 void do_settings_menu(void);
 void do_enhanced_menu(void);
+void do_controls_menu(void);
 int  do_slot_select(const char *title);
 
 static int menu_selection = 0;
@@ -513,6 +515,21 @@ enum {
     SETT_SCALEMODE,
     SETT_SPEED_MODE,
     SETT_WIDESCREEN,
+    SETT_CONTROLS,
+    SETT_P1_UP,
+    SETT_P1_DOWN,
+    SETT_P1_LEFT,
+    SETT_P1_RIGHT,
+    SETT_P2_UP,
+    SETT_P2_DOWN,
+    SETT_P2_LEFT,
+    SETT_P2_RIGHT,
+    SETT_P1_RUN,
+    SETT_P1_JUMP,
+    SETT_P1_USE,
+    SETT_P2_RUN,
+    SETT_P2_JUMP,
+    SETT_P2_USE,
     SETT_MAX
 };
 
@@ -590,6 +607,30 @@ static const char *subtitle_hold_names[] = { "Original", "Long", "Match voice" }
 static const char *scale_mode_names[] = { "Pillarbox", "Crop", "Stretch" };
 static const char *speed_mode_names[] = { "Sneak", "Walk", "Run" };
 
+/* Common keys selectable in the Controls panel (PKEY_* values from platform.h). */
+static const struct { int key; const char *name; } control_key_table[] = {
+    { 0x11, "W" }, { 0x1E, "A" }, { 0x1F, "S" }, { 0x20, "D" },
+    { 0x10, "Q" }, { 0x12, "E" }, { 0x2C, "Z" }, { 0x2E, "C" },
+    { 0xC8, "Up" }, { 0xD0, "Down" }, { 0xCB, "Left" }, { 0xCD, "Right" },
+    { 0x4F, "Num1" }, { 0x50, "Num2" }, { 0x51, "Num3" }, { 0x4B, "Num4" },
+    { 0x4C, "Num5" }, { 0x4D, "Num6" }, { 0x47, "Num7" }, { 0x48, "Num8" },
+    { 0x49, "Num9" }, { 0x52, "Num0" }, { 0x39, "Space" }, { 0x1D, "LCtrl" },
+    { 0x2A, "LShift" }, { 0x38, "LAlt" },
+};
+#define CONTROL_KEY_COUNT (sizeof(control_key_table) / sizeof(control_key_table[0]))
+
+static const char *control_key_name(int key) {
+    for (size_t i = 0; i < CONTROL_KEY_COUNT; i++)
+        if (control_key_table[i].key == key) return control_key_table[i].name;
+    return "Unknown";
+}
+
+static int control_key_index(int key) {
+    for (size_t i = 0; i < CONTROL_KEY_COUNT; i++)
+        if (control_key_table[i].key == key) return (int)i;
+    return 0;
+}
+
 static void settings_get_value(int id, char *buf, int bufsz) {
     if (setting_is_locked(id)) {
         snprintf(buf, bufsz, "Original");
@@ -651,6 +692,23 @@ static void settings_get_value(int id, char *buf, int bufsz) {
         else
             snprintf(buf, bufsz, "%s", aspect_ratio_name(aspect_ratio_in_use()));
         break;
+    case SETT_CONTROLS:
+        snprintf(buf, bufsz, "Open");
+        break;
+    case SETT_P1_UP:    snprintf(buf, bufsz, "%s", control_key_name(p1_key_up)); break;
+    case SETT_P1_DOWN:  snprintf(buf, bufsz, "%s", control_key_name(p1_key_down)); break;
+    case SETT_P1_LEFT:  snprintf(buf, bufsz, "%s", control_key_name(p1_key_left)); break;
+    case SETT_P1_RIGHT: snprintf(buf, bufsz, "%s", control_key_name(p1_key_right)); break;
+    case SETT_P2_UP:    snprintf(buf, bufsz, "%s", control_key_name(p2_key_up)); break;
+    case SETT_P2_DOWN:  snprintf(buf, bufsz, "%s", control_key_name(p2_key_down)); break;
+    case SETT_P2_LEFT:  snprintf(buf, bufsz, "%s", control_key_name(p2_key_left)); break;
+    case SETT_P2_RIGHT: snprintf(buf, bufsz, "%s", control_key_name(p2_key_right)); break;
+    case SETT_P1_RUN:   snprintf(buf, bufsz, "%s", control_key_name(p1_key_run)); break;
+    case SETT_P1_JUMP:  snprintf(buf, bufsz, "%s", control_key_name(p1_key_jump)); break;
+    case SETT_P1_USE:   snprintf(buf, bufsz, "%s", control_key_name(p1_key_use)); break;
+    case SETT_P2_RUN:   snprintf(buf, bufsz, "%s", control_key_name(p2_key_run)); break;
+    case SETT_P2_JUMP:  snprintf(buf, bufsz, "%s", control_key_name(p2_key_jump)); break;
+    case SETT_P2_USE:   snprintf(buf, bufsz, "%s", control_key_name(p2_key_use)); break;
     }
 }
 
@@ -730,6 +788,46 @@ static void settings_adjust(int id, int dir) {
         save_port_settings();
         break;
     }
+    case SETT_CONTROLS:
+        do_controls_menu();
+        break;
+    case SETT_P1_UP:
+    case SETT_P1_DOWN:
+    case SETT_P1_LEFT:
+    case SETT_P1_RIGHT:
+    case SETT_P2_UP:
+    case SETT_P2_DOWN:
+    case SETT_P2_LEFT:
+    case SETT_P2_RIGHT:
+    case SETT_P1_RUN:
+    case SETT_P1_JUMP:
+    case SETT_P1_USE:
+    case SETT_P2_RUN:
+    case SETT_P2_JUMP:
+    case SETT_P2_USE: {
+        int *target = NULL;
+        switch (id) {
+        case SETT_P1_UP: target = &p1_key_up; break;
+        case SETT_P1_DOWN: target = &p1_key_down; break;
+        case SETT_P1_LEFT: target = &p1_key_left; break;
+        case SETT_P1_RIGHT: target = &p1_key_right; break;
+        case SETT_P2_UP: target = &p2_key_up; break;
+        case SETT_P2_DOWN: target = &p2_key_down; break;
+        case SETT_P2_LEFT: target = &p2_key_left; break;
+        case SETT_P2_RIGHT: target = &p2_key_right; break;
+        case SETT_P1_RUN: target = &p1_key_run; break;
+        case SETT_P1_JUMP: target = &p1_key_jump; break;
+        case SETT_P1_USE: target = &p1_key_use; break;
+        case SETT_P2_RUN: target = &p2_key_run; break;
+        case SETT_P2_JUMP: target = &p2_key_jump; break;
+        case SETT_P2_USE: target = &p2_key_use; break;
+        }
+        int idx = control_key_index(*target);
+        idx = (idx + (dir > 0 ? 1 : (int)CONTROL_KEY_COUNT - 1)) % (int)CONTROL_KEY_COUNT;
+        *target = control_key_table[idx].key;
+        save_port_settings();
+        break;
+    }
     }
 }
 
@@ -737,13 +835,20 @@ static const char *settings_labels[] = {
     "Difficulty", "Language", "Music", "Sound FX", "Subtitles",
     "Subtitle Size", "Subtitle Hold", "Graphics",
     "Supersampling", "3D Lighting", "Background", "Scale Mode",
-    "Speed Mode", "Aspect Ratio"
+    "Speed Mode", "Aspect Ratio", "Controls",
+    "P1 Up", "P1 Down", "P1 Left", "P1 Right",
+    "P2 Up", "P2 Down", "P2 Left", "P2 Right",
+    "P1 Run", "P1 Jump", "P1 Use",
+    "P2 Run", "P2 Jump", "P2 Use"
 };
 
 /* Shared driver for Settings and its Enhanced sub-panel: same rows, same
  * navigation, only the item list and the title differ. */
+static int controls_listening = 0;
+
 static void run_settings_panel(const char *title, const int *items, int num_items) {
     int sel = 0;
+    controls_listening = 0;
 
     for (;;) {
         /* screen_width/height change under the graphics toggle. */
@@ -765,38 +870,89 @@ static void run_settings_panel(const char *title, const int *items, int num_item
         for (int i = 0; i < num_items; i++) {
             char val[32];
             int id = items[i];
-            settings_get_value(id, val, sizeof(val));
-            bool arrows = !setting_is_locked(id);
+            if (controls_listening && i == sel &&
+                (id == SETT_P1_UP || id == SETT_P1_DOWN || id == SETT_P1_LEFT ||
+                 id == SETT_P1_RIGHT || id == SETT_P2_UP || id == SETT_P2_DOWN ||
+                 id == SETT_P2_LEFT || id == SETT_P2_RIGHT ||
+                 id == SETT_P1_RUN || id == SETT_P1_JUMP || id == SETT_P1_USE ||
+                 id == SETT_P2_RUN || id == SETT_P2_JUMP || id == SETT_P2_USE))
+                snprintf(val, sizeof(val), "Press a key...");
+            else
+                settings_get_value(id, val, sizeof(val));
+            bool arrows = !setting_is_locked(id) && !controls_listening;
             draw_setting_row(settings_labels[id], val,
                              item_x, start_y + i * item_h, item_w,
                              i == sel, arrows);
         }
 
-        if (menu_nav_up()) {
-            if (sel > 0) sel--;
-            platform_delay(120);
-        }
-        if (menu_nav_down()) {
-            if (sel < num_items - 1) sel++;
-            platform_delay(120);
+        int id = items[sel];
+        bool is_binding = (id == SETT_P1_UP || id == SETT_P1_DOWN || id == SETT_P1_LEFT ||
+                           id == SETT_P1_RIGHT || id == SETT_P2_UP || id == SETT_P2_DOWN ||
+                           id == SETT_P2_LEFT || id == SETT_P2_RIGHT ||
+                           id == SETT_P1_RUN || id == SETT_P1_JUMP || id == SETT_P1_USE ||
+                           id == SETT_P2_RUN || id == SETT_P2_JUMP || id == SETT_P2_USE);
+
+        if (controls_listening) {
+            /* Capture the first key pressed from the known list. */
+            for (size_t ki = 0; ki < CONTROL_KEY_COUNT; ki++) {
+                platform_t *pp = win_platform();
+                if (pp && platform_key_down(pp, control_key_table[ki].key)) {
+                    int *target = NULL;
+                    switch (id) {
+                    case SETT_P1_UP: target = &p1_key_up; break;
+                    case SETT_P1_DOWN: target = &p1_key_down; break;
+                    case SETT_P1_LEFT: target = &p1_key_left; break;
+                    case SETT_P1_RIGHT: target = &p1_key_right; break;
+                    case SETT_P2_UP: target = &p2_key_up; break;
+                    case SETT_P2_DOWN: target = &p2_key_down; break;
+                    case SETT_P2_LEFT: target = &p2_key_left; break;
+                    case SETT_P2_RIGHT: target = &p2_key_right; break;
+                    case SETT_P1_RUN: target = &p1_key_run; break;
+                    case SETT_P1_JUMP: target = &p1_key_jump; break;
+                    case SETT_P1_USE: target = &p1_key_use; break;
+                    case SETT_P2_RUN: target = &p2_key_run; break;
+                    case SETT_P2_JUMP: target = &p2_key_jump; break;
+                    case SETT_P2_USE: target = &p2_key_use; break;
+                    }
+                    if (target) *target = control_key_table[ki].key;
+                    save_port_settings();
+                    controls_listening = 0;
+                    platform_delay(250);
+                    break;
+                }
+            }
+            if (menu_back()) { controls_listening = 0; platform_delay(150); }
+        } else {
+            if (menu_nav_up()) {
+                if (sel > 0) sel--;
+                platform_delay(120);
+            }
+            if (menu_nav_down()) {
+                if (sel < num_items - 1) sel++;
+                platform_delay(120);
+            }
+
+            if (menu_nav_left() || menu_nav_right()) {
+                int dir = menu_nav_right() ? 1 : -1;
+                settings_adjust(items[sel], dir);
+                platform_delay(150);
+            }
+
+            if (menu_confirm() && is_binding) {
+                controls_listening = 1;
+                platform_delay(250);
+            } else if (menu_confirm()) {
+                if (id == SETT_MUSIC || id == SETT_SOUNDFX || id == SETT_SUBTITLES ||
+                    id == SETT_GRAPHICS || id == SETT_LIGHTING ||
+                    id == SETT_MAP3D || id == SETT_WIDESCREEN)
+                    settings_adjust(id, 1);
+                platform_delay(150);
+            }
+
+            if (menu_back()) return;
         }
 
-        if (menu_nav_left() || menu_nav_right()) {
-            int dir = menu_nav_right() ? 1 : -1;
-            settings_adjust(items[sel], dir);
-            platform_delay(150);
-        }
-
-        if (menu_confirm()) {
-            int id = items[sel];
-            if (id == SETT_MUSIC || id == SETT_SOUNDFX || id == SETT_SUBTITLES ||
-                id == SETT_GRAPHICS || id == SETT_LIGHTING ||
-                id == SETT_MAP3D || id == SETT_WIDESCREEN)
-                settings_adjust(id, 1);
-            platform_delay(150);
-        }
-
-        if (menu_back()) return;
+        menu_frame_end();
 
         menu_frame_end();
     }
@@ -831,8 +987,30 @@ void do_enhanced_menu(void) {
      * still works from the menu on any platform or input device. */
     if (game_version == GAME_VERSION_E1)
         items[num_items++] = SETT_SPEED_MODE;
+    items[num_items++] = SETT_CONTROLS;
 
     run_settings_panel("Enhanced", items, num_items);
+}
+
+/* Port-only controls remapping panel. */
+void do_controls_menu(void) {
+    int items[SETT_MAX];
+    int num_items = 0;
+    items[num_items++] = SETT_P1_UP;
+    items[num_items++] = SETT_P1_DOWN;
+    items[num_items++] = SETT_P1_LEFT;
+    items[num_items++] = SETT_P1_RIGHT;
+    items[num_items++] = SETT_P2_UP;
+    items[num_items++] = SETT_P2_DOWN;
+    items[num_items++] = SETT_P2_LEFT;
+    items[num_items++] = SETT_P2_RIGHT;
+    /* No run rows: E1 heroes auto-run (update_run_modes in player.c), so a
+     * run binding would configure a key that does nothing. */
+    items[num_items++] = SETT_P1_JUMP;
+    items[num_items++] = SETT_P1_USE;
+    items[num_items++] = SETT_P2_JUMP;
+    items[num_items++] = SETT_P2_USE;
+    run_settings_panel("Controls", items, num_items);
 }
 
 /* menu_do_settings_menu  E1: ? | E2P: 0x42B6F0 */

@@ -20,6 +20,7 @@
 #include "player.h"
 #include "display.h"
 #include "edit.h"
+#include "file.h"
 #include "game.h"
 #include "init.h"
 #include "map.h"
@@ -37,6 +38,24 @@
 player_t coop_players[COOP_MAX_PLAYERS];
 int coop_num_players = 0;
 
+/* Configurable movement keys (PKEY_* values), defaults match the original
+ * hard-coded bindings. */
+int p1_key_up = 0x11;    /* PKEY_W */
+int p1_key_down = 0x1F;  /* PKEY_S */
+int p1_key_left = 0x1E;  /* PKEY_A */
+int p1_key_right = 0x20; /* PKEY_D */
+int p2_key_up = 0xC8;    /* PKEY_UP */
+int p2_key_down = 0xD0;  /* PKEY_DOWN */
+int p2_key_left = 0xCB;  /* PKEY_LEFT */
+int p2_key_right = 0xCD; /* PKEY_RIGHT */
+/* Action keys (defaults: P1 run=LShift, jump=LCtrl; P2 run=Num0, jump=NumDec). */
+int p1_key_run = 0x2A;   /* PKEY_LSHIFT */
+int p1_key_jump = 0x1D;  /* PKEY_LCTRL */
+int p1_key_use = 0x39;   /* PKEY_SPACE */
+int p2_key_run = 0x52;   /* PKEY_NUM0 */
+int p2_key_jump = 0x53;  /* PKEY_NUMDEC */
+int p2_key_use = 0x4C;   /* PKEY_NUM5 */
+
 static bool spawn_pending;
 static bool remove_pending;
 static bool input_swapped;
@@ -45,6 +64,13 @@ static bool player1_follow_mode;
 static bool player2_follow_mode;
 static uint32_t player1_last_input_time;
 static uint32_t player2_last_input_time;
+/* E1 run: the Key_F* speed scripts edit each hero's own repertoire (walk
+ * slots -> run animations), so the run set is tracked and applied per hero. */
+static bool e1_player_run_applied[COOP_MAX_PLAYERS];
+static int16_t e1_key_f8_code = -2;
+static int16_t e1_key_f12_code = -2;
+static void e1_apply_run_mode(actor_t *actor, bool run);
+static void update_run_modes(void);
 static int16_t p2_camera_index = -1;
 static struct {
     camera_data_t *active;
@@ -104,6 +130,8 @@ bool coop_is_player2_actor(const actor_t *actor) {
 /* Test-only trace: ECSTATICA_COOP_TRACE=1 logs both players' positions,
  * input flags and first part colour twice a second. Used by the automated
  * two-player control test; no effect when the variable is unset. */
+static unsigned input_to_bits(const player_input_t *in);
+
 static void coop_trace_positions(void) {
     static int trace = -1;
     static uint32_t last_trace;
@@ -134,13 +162,24 @@ static void coop_trace_positions(void) {
     int sel = (selected_thing == p1) ? 1 : (selected_thing == p2) ? 2 : 0;
     DBG_LOG(1,
             "[COOP] trace p1=(%d,%d,%d) p2=(%d,%d,%d) "
-            "in1=%d%d%d%d in2=%d%d%d%d bh1=%d bh2=%d col1=%d col2=%d "
+            "in1=%d%d%d%d in2=%d%d%d%d b1=%u b2=%u eq=%d%d "
+            "bh1=%d bh2=%d col1=%d col2=%d "
+            "run1=%d run2=%d fol1=%d fol2=%d fs1=%d fs2=%d mt1=%d mt2=%d "
+            "rep1=%d rep2=%d "
             "act1=%d act2=%d sel=%d gt=%d\n",
             p1->position_vector.X, p1->position_vector.Y, p1->position_vector.Z,
             p2->position_vector.X, p2->position_vector.Y, p2->position_vector.Z,
             i1->up, i1->down, i1->left, i1->right,
             i2->up, i2->down, i2->left, i2->right,
+            input_to_bits(i1), input_to_bits(i2),
+            coop_players[0].actor == p1, coop_players[1].actor == p2,
             p1->actor_behavior, p2->actor_behavior, c1, c2,
+            /* run1/run2 log the applied auto-run state, not a held key. */
+            e1_player_run_applied[0], e1_player_run_applied[1],
+            player1_follow_mode, player2_follow_mode,
+            coop_players[0].follow_stopped, coop_players[1].follow_stopped,
+            p1->move_type, p2->move_type,
+            p1->actor_rep_index, p2->actor_rep_index,
             p1->actor_act.act_action != NULL, p2->actor_act.act_action != NULL,
             sel, game_time);
 }
@@ -210,19 +249,17 @@ static void capture_player1_input(void) {
          * the Windows menu bar. */
         platform_t *p1p = win_platform();
         bool w_down = false, a_down = false, s_down = false, d_down = false;
-        bool left_ctrl = false, left_shift = false, space = false;
+        bool space = false;
         bool e_down = false, r_down = false, f_down = false, c_down = false;
         if (p1p) {
-            w_down = platform_key_down(p1p, PKEY_W);
-            a_down = platform_key_down(p1p, PKEY_A);
-            s_down = platform_key_down(p1p, PKEY_S);
-            d_down = platform_key_down(p1p, PKEY_D);
+            w_down = platform_key_down(p1p, p1_key_up);
+            a_down = platform_key_down(p1p, p1_key_left);
+            s_down = platform_key_down(p1p, p1_key_down);
+            d_down = platform_key_down(p1p, p1_key_right);
             e_down = platform_key_down(p1p, PKEY_E);
             r_down = platform_key_down(p1p, PKEY_R);
             f_down = platform_key_down(p1p, PKEY_F);
             c_down = platform_key_down(p1p, PKEY_C);
-            left_ctrl = platform_key_down(p1p, PKEY_LCTRL);
-            left_shift = platform_key_down(p1p, PKEY_LSHIFT);
             space = platform_key_down(p1p, PKEY_SPACE);
         }
 
@@ -233,10 +270,13 @@ static void capture_player1_input(void) {
         in->down = s_down;
         in->left = a_down;
         in->right = d_down;
-        in->use = space;
-        in->run = left_ctrl;
+        in->use = platform_key_down(p1p, p1_key_use);
+        /* E1 auto-runs (see update_run_modes), so the run key stays inert
+         * instead of toggling anything; E2 keeps a held run key. */
+        in->run = (game_version == GAME_VERSION_E1) ? false
+                                                    : platform_key_down(p1p, p1_key_run);
         in->alt = platform_key_down(p1p, PKEY_LALT);
-        in->jump = left_shift;
+        in->jump = platform_key_down(p1p, p1_key_jump);
         in->pickup_left = e_down;
         in->pickup_right = f_down;
         in->swing_left = r_down;
@@ -263,7 +303,8 @@ static void capture_player1_input(void) {
 
             in->use  |= gp.btn_south;
             in->jump |= gp.btn_lb;
-            in->run  |= gp.btn_rb || gp.btn_rt;
+            if (game_version != GAME_VERSION_E1)
+                in->run |= gp.btn_rb || gp.btn_rt;   /* E1 auto-runs */
             in->alt  |= gp.btn_lt;
             in->pickup_left  |= gp.btn_west;
             in->pickup_right |= gp.btn_north;
@@ -333,14 +374,16 @@ static void poll_player2_input(void) {
      * globals, which hold P1's input). P2 has its OWN modifiers and use key
      * (NUM0/NUM./NUM+/NUM5) so that pressing Space/Ctrl/Shift/Alt for P1
      * never triggers P2's actions. */
-    in->up    |= platform_key_down(p, PKEY_UP)    || platform_key_down(p, PKEY_NUM8);
-    in->down  |= platform_key_down(p, PKEY_DOWN)  || platform_key_down(p, PKEY_NUM2);
-    in->left  |= platform_key_down(p, PKEY_LEFT)  || platform_key_down(p, PKEY_NUM4);
-    in->right |= platform_key_down(p, PKEY_RIGHT) || platform_key_down(p, PKEY_NUM6);
-    in->use   |= platform_key_down(p, PKEY_NUM5);
-    in->run   |= platform_key_down(p, PKEY_NUM0);
+    in->up    |= platform_key_down(p, p2_key_up)    || platform_key_down(p, PKEY_NUM8);
+    in->down  |= platform_key_down(p, p2_key_down)  || platform_key_down(p, PKEY_NUM2);
+    in->left  |= platform_key_down(p, p2_key_left)  || platform_key_down(p, PKEY_NUM4);
+    in->right |= platform_key_down(p, p2_key_right) || platform_key_down(p, PKEY_NUM6);
+    in->use   |= platform_key_down(p, p2_key_use)   || platform_key_down(p, PKEY_NUM5);
+    /* E1 auto-runs (see update_run_modes), so P2's run keys stay inert. */
+    if (game_version != GAME_VERSION_E1)
+        in->run   |= platform_key_down(p, p2_key_run)   || platform_key_down(p, PKEY_NUM0);
     in->alt   |= platform_key_down(p, PKEY_NUMPLUS);
-    in->jump  |= platform_key_down(p, PKEY_NUMDEC);
+    in->jump  |= platform_key_down(p, p2_key_jump)  || platform_key_down(p, PKEY_NUMDEC);
     in->pickup_left  |= platform_key_down(p, PKEY_NUM1);
     in->pickup_right |= platform_key_down(p, PKEY_NUM3);
     in->swing_left   |= platform_key_down(p, PKEY_NUM7);
@@ -363,7 +406,8 @@ static void poll_player2_input(void) {
 
         in->use  |= gp.btn_south;
         in->jump |= gp.btn_lb;
-        in->run  |= gp.btn_rb || gp.btn_rt;
+        if (game_version != GAME_VERSION_E1)
+            in->run |= gp.btn_rb || gp.btn_rt;   /* E1 auto-runs */
         in->alt  |= gp.btn_lt;
         in->pickup_left  |= gp.btn_west;
         in->pickup_right |= gp.btn_north;
@@ -383,7 +427,15 @@ static bool player_has_input(const player_input_t *in) {
 static bool idle_follow_due(uint32_t last_input_time) {
     uint32_t now = (uint32_t)my_time();
     return (uint32_t)(now - last_input_time) >=
-           3u * (uint32_t)MY_TIME_PER_SEC;
+           (3u * (uint32_t)MY_TIME_PER_SEC) / 2u;
+}
+
+/* A hero counts as "playing" briefly after the last keypress so a follower
+ * can catch up when the leader pauses between actions. Kept much shorter
+ * than the idle delay so two idle heroes never start following each other. */
+static bool player_recently_active(uint32_t last_input_time) {
+    uint32_t now = (uint32_t)my_time();
+    return (uint32_t)(now - last_input_time) < (uint32_t)MY_TIME_PER_SEC;
 }
 
 /* Test switch: ECSTATICA_COOP_NO_FOLLOW=1 turns the idle auto-follow off so
@@ -419,13 +471,16 @@ static void update_player1_follow_mode(void) {
     if (player_has_input(&coop_players[0].input)) {
         player1_last_input_time = (uint32_t)my_time();
         player1_follow_mode = false;
+        coop_players[0].follow_stopped = false;
         return;
     }
 
-    /* If both players are idle, let only P2 follow P1 instead of having them
-     * chase each other. */
-    if (idle_follow_due(player2_last_input_time)) {
+    /* Mutual idle-follow: P1 trails P2 while P2 is being played. Checking
+     * recent input (rather than the 3 s idle timer) means two idle heroes
+     * always stand still instead of wandering off together. */
+    if (!player_recently_active(player2_last_input_time)) {
         player1_follow_mode = false;
+        coop_players[0].follow_stopped = false;
         return;
     }
 
@@ -454,10 +509,19 @@ static void update_player2_follow_mode(void) {
     if (player_has_input(&coop_players[1].input)) {
         player2_last_input_time = now;
         player2_follow_mode = false;
+        coop_players[1].follow_stopped = false;
         return;
     }
 
-    /* Let P2 walk away from the keys briefly without the AI taking over. */
+    /* Mutual idle-follow: P2 trails P1 while P1 is being played. Checking
+     * recent input (rather than the 3 s idle timer) means two idle heroes
+     * always stand still instead of wandering off together. */
+    if (!player_recently_active(player1_last_input_time)) {
+        player2_follow_mode = false;
+        coop_players[1].follow_stopped = false;
+        return;
+    }
+
     player2_follow_mode = idle_follow_due(player2_last_input_time);
 }
 
@@ -489,7 +553,10 @@ static void install_player_input(const player_input_t *in) {
     key5_pressed = false;
 
     space_pressed = in->use;
-    ctrl_pressed = in->run;
+    /* E1: ctrl is the directional-attack modifier, not run. Run is handled
+     * separately (see update_run_modes), so in E1 this stays clear or the
+     * run key would swing an attack instead of sprinting. E2 keeps run. */
+    ctrl_pressed = (game_version == GAME_VERSION_E1) ? false : in->run;
     alt_pressed = in->alt;
     joystick = direction_index(in);
     joy_button = in->use ? 1 : 0;
@@ -529,6 +596,11 @@ bool coop_begin_actor_input(actor_t *actor) {
                   actor->actor_behavior != BH_RECOVERING;
     joystick_control = !follow;
     if (follow) {
+        if (actor->actor_behavior != BH_FOLLOW) {
+            actor->interact_state = 0;
+            actor->interact_cooldown = 0;
+            actor->interact_timer = 0;
+        }
         actor->actor_behavior = BH_FOLLOW;
         actor->interact_target_index = follow_target->name_index;
     }
@@ -657,6 +729,7 @@ static void spawn_player2(void) {
     coop_num_players = 2;
     player2_last_input_time = (uint32_t)my_time();
     player2_follow_mode = false;
+    coop_players[1].follow_stopped = false;
 
     DBG_LOG(1, "[COOP] player 2 spawned: thing=%d at %d,%d,%d (p1 %d,%d,%d)\n",
             (int)p2->name_index,
@@ -675,6 +748,9 @@ void coop_on_hero_loaded(int16_t hero_index) {
     coop_num_players = coop_players[0].active ? 1 : 0;
     player1_last_input_time = (uint32_t)my_time();
     player1_follow_mode = false;
+    coop_players[0].follow_stopped = false;
+    e1_player_run_applied[0] = false;
+    e1_player_run_applied[1] = false;
 
     DBG_LOG(1, "[COOP] hero loaded: index=%d actor=%p\n",
             (int)hero_index, (void *)coop_players[0].actor);
@@ -687,10 +763,77 @@ void coop_on_hero_restored(actor_t *hero) {
     coop_num_players = 1;
     player1_last_input_time = (uint32_t)my_time();
     player1_follow_mode = false;
+    coop_players[0].follow_stopped = false;
+    e1_player_run_applied[0] = false;
+    e1_player_run_applied[1] = false;
     spawn_pending = true;
     if (coop_players[1].actor)
         remove_pending = true;
     DBG_LOG(1, "[COOP] hero restored: thing=%d\n", (int)hero->name_index);
+}
+
+/* fdinhe_rep picks the hero's repertoire from the hero named "fdinhe" (thing
+ * slot 0) and reads hands/HP from selected_thing, so point both at this hero
+ * for the duration. Player 2 is a second copy of the same thing, and without
+ * this the script always rewrites player 1's repertoire. */
+static void e1_execute_hero_rep(actor_t *actor, int16_t code_idx) {
+    if (!actor || code_idx < 0 || code_idx >= CODE_TAB_SIZE || !code_tab[code_idx])
+        return;
+    actor_t *saved_thing0 = thing_tab[0];
+    actor_t *saved_selected = selected_thing;
+    int16_t saved_rep_name0 = actor_rep_name[0];
+    thing_tab[0] = actor;
+    selected_thing = actor;
+    execute_thing_code(actor, code_idx);
+    thing_tab[0] = saved_thing0;
+    selected_thing = saved_selected;
+    actor_rep_name[0] = saved_rep_name0;
+}
+
+/* Apply one hero's run (or walk) repertoire. The Key_F* scripts only set scene
+ * flags and then run fdinhe_rep, which selects the walk/run set for that hero. */
+static void e1_apply_run_mode(actor_t *actor, bool run) {
+    if (e1_key_f8_code == -2) {
+        e1_key_f8_code = find_code_name_index("Key_F5_8");
+        e1_key_f12_code = find_code_name_index("Key_F9_12");
+    }
+    int16_t ci = run ? e1_key_f12_code : e1_key_f8_code;
+    if (ci < 0 || !code_tab[ci]) {
+        movement_speed_mode = run ? 8 : 4;
+        return;
+    }
+    e1_execute_hero_rep(actor, ci);
+    /* The rep change only takes effect when the movement action restarts, and
+     * a held direction keeps move_type, so force this hero to restart the
+     * current action now - that makes the switch instant instead of waiting
+     * until the next stop or turn. Uninterruptible actions (e.g. pick-ups)
+     * are left alone. */
+    if (!(actor->flags & 0x40) &&
+        !(actor->actor_act.act_action && (actor->actor_act.flags & 0x40))) {
+        actor->move_type = 1000;
+        actor->actor_act.act_action = NULL;
+    }
+    DBG_LOG(1, "[COOP] run mode %s for thing %d (code=%d)\n",
+            run ? "run" : "walk", (int)actor->name_index, (int)ci);
+}
+
+/* E1 auto-run: both heroes always use the run animation/speed set — no key
+ * needed. The Key_F* scripts edit each hero's own repertoire, so the run set
+ * is applied per hero: once after the intro hands control over, and again
+ * whenever a hero (re)spawns with a freshly loaded repertoire. Run keys stay
+ * inert; the F1-F12 / L3 speed overrides still work on top of this. */
+static void update_run_modes(void) {
+    if (game_version != GAME_VERSION_E1 || intro_flag) return;
+    for (int i = 0; i < COOP_MAX_PLAYERS; i++) {
+        actor_t *a = coop_players[i].actor;
+        if (!coop_players[i].active || !a) {
+            e1_player_run_applied[i] = false;
+            continue;
+        }
+        if (e1_player_run_applied[i]) continue;
+        e1_apply_run_mode(a, true);
+        e1_player_run_applied[i] = true;
+    }
 }
 
 void coop_reset_game(void) {
@@ -704,6 +847,8 @@ void coop_reset_game(void) {
     player2_follow_mode = false;
     player1_last_input_time = 0;
     player2_last_input_time = 0;
+    e1_player_run_applied[0] = false;
+    e1_player_run_applied[1] = false;
 
     /* A menuless autostart (no intro) should still get player 2 as soon as
      * the game loop begins. */
@@ -767,6 +912,7 @@ void coop_frame_update(void) {
     poll_player2_input();
     update_player1_follow_mode();
     update_player2_follow_mode();
+    update_run_modes();
 
     /* Manual P1 input always retakes the selected-actor slot, even if the
      * shared-camera handoff selected P2 on the previous frame. */
@@ -798,6 +944,8 @@ void coop_frame_update(void) {
         player2_last_input_time = player1_last_input_time;
         player1_follow_mode = false;
         player2_follow_mode = false;
+        coop_players[0].follow_stopped = false;
+        coop_players[1].follow_stopped = false;
     }
 
     /* Track P2's camera index so split-screen view follows P2's movement. */

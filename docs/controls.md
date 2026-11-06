@@ -60,6 +60,10 @@ Shift first and does have it.
 | F5-F8 | Walk mode (default) |
 | F9-F12 | Running mode |
 
+In the co-op build both heroes **start in Running mode automatically** (no key
+needed); F1-F12 and the L3 stick click still switch the speed mode manually
+afterwards.
+
 ### System
 
 | Key | Action |
