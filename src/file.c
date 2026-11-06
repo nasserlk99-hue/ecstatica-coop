@@ -2003,12 +2003,16 @@ void load_port_settings(void) {
             p1_key_jump = value;
         } else if (sscanf(line, "p1_use = %d", &value) == 1) {
             p1_key_use = value;
+        } else if (sscanf(line, "p1_fire = %d", &value) == 1) {
+            p1_key_fire = value;
         } else if (sscanf(line, "p2_run = %d", &value) == 1) {
             p2_key_run = value;
         } else if (sscanf(line, "p2_jump = %d", &value) == 1) {
             p2_key_jump = value;
         } else if (sscanf(line, "p2_use = %d", &value) == 1) {
             p2_key_use = value;
+        } else if (sscanf(line, "p2_fire = %d", &value) == 1) {
+            p2_key_fire = value;
         }
     }
     fclose(f);
@@ -2037,9 +2041,11 @@ void save_port_settings(void) {
     fprintf(f, "p1_run = %d\n", p1_key_run);
     fprintf(f, "p1_jump = %d\n", p1_key_jump);
     fprintf(f, "p1_use = %d\n", p1_key_use);
+    fprintf(f, "p1_fire = %d\n", p1_key_fire);
     fprintf(f, "p2_run = %d\n", p2_key_run);
     fprintf(f, "p2_jump = %d\n", p2_key_jump);
     fprintf(f, "p2_use = %d\n", p2_key_use);
+    fprintf(f, "p2_fire = %d\n", p2_key_fire);
     fclose(f);
 }
 

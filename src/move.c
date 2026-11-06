@@ -226,6 +226,13 @@ void do_movement(void) {
                     behaviour(actor, local_game_time);
                     if (swapped)
                         coop_end_actor_input();
+                    /* Simple pistol: fire a bullet from the player's right hand
+                     * when the fire key rising edge was seen this frame. */
+                    if (coop_is_player_actor(actor)) {
+                        int pidx = coop_is_player2_actor(actor) ? 1 : 0;
+                        if (coop_consume_fire(pidx))
+                            coop_player_try_fire(actor);
+                    }
                 }
             }
 

@@ -25,6 +25,7 @@
 #include "init.h"
 #include "map.h"
 #include "menu.h"
+#include "move.h"
 #include "music.h"
 #include "net.h"
 #include "platform.h"
@@ -55,6 +56,9 @@ int p1_key_use = 0x39;   /* PKEY_SPACE */
 int p2_key_run = 0x52;   /* PKEY_NUM0 */
 int p2_key_jump = 0x53;  /* PKEY_NUMDEC */
 int p2_key_use = 0x4C;   /* PKEY_NUM5 */
+/* Fire (pistol) key. P1: V, P2: Numpad Minus. */
+int p1_key_fire = 0x2F;  /* PKEY_V */
+int p2_key_fire = 0x4A;  /* PKEY_NUMMINUS */
 
 static bool spawn_pending;
 static bool remove_pending;
@@ -62,6 +66,8 @@ static bool input_swapped;
 static bool split_camera_saved;
 static bool player1_follow_mode;
 static bool player2_follow_mode;
+static bool player1_fire_requested;
+static bool player2_fire_requested;
 static uint32_t player1_last_input_time;
 static uint32_t player2_last_input_time;
 /* E1 run: the Key_F* speed scripts edit each hero's own repertoire (walk
@@ -281,6 +287,8 @@ static void capture_player1_input(void) {
         in->pickup_right = f_down;
         in->swing_left = r_down;
         in->swing_right = c_down;
+        if (p1p && platform_key_hit(p1p, p1_key_fire))
+            player1_fire_requested = true;
     }
     /* Gamepad 0 (the one window_proc already merged into the globals) always
      * drives P1, even straight after a botched swap. */
@@ -388,6 +396,8 @@ static void poll_player2_input(void) {
     in->pickup_right |= platform_key_down(p, PKEY_NUM3);
     in->swing_left   |= platform_key_down(p, PKEY_NUM7);
     in->swing_right  |= platform_key_down(p, PKEY_NUM9);
+    if (platform_key_hit(p, p2_key_fire))
+        player2_fire_requested = true;
 
     platform_gamepad_state_t gp;
     if (platform_gamepad_poll_index(p, 1, &gp) && gp.connected) {
@@ -606,6 +616,35 @@ bool coop_begin_actor_input(actor_t *actor) {
     }
     input_swapped = true;
     return true;
+}
+
+void coop_player_try_fire(actor_t *actor) {
+    if (!actor || !actor->_PartTab) return;
+    /* Use the right hand (field_0[8]) as the firing point. If it holds a
+     * weapon, fire from the weapon; otherwise fire from the arm itself. */
+    part_t *right_arm = actor->_PartTab->field_0[8];
+    part_t *src = right_arm;
+    if (right_arm && right_arm->actor_2_held) {
+        /* Try to find a part belonging to the held weapon actor so the
+         * bullet originates from the weapon's position/orientation. */
+        actor_t *weapon = right_arm->actor_2_held;
+        if (weapon && weapon->_PartTab && weapon->_PartTab->field_0[0])
+            src = weapon->_PartTab->field_0[0];
+    }
+    if (!src) return;
+    fire_bullet(src);
+}
+
+bool coop_consume_fire(int player_index) {
+    if (player_index == 0) {
+        if (player1_fire_requested) { player1_fire_requested = false; return true; }
+        return false;
+    }
+    if (player_index == 1) {
+        if (player2_fire_requested) { player2_fire_requested = false; return true; }
+        return false;
+    }
+    return false;
 }
 
 void coop_end_actor_input(void) {

@@ -527,9 +527,11 @@ enum {
     SETT_P1_RUN,
     SETT_P1_JUMP,
     SETT_P1_USE,
+    SETT_P1_FIRE,
     SETT_P2_RUN,
     SETT_P2_JUMP,
     SETT_P2_USE,
+    SETT_P2_FIRE,
     SETT_MAX
 };
 
@@ -706,9 +708,11 @@ static void settings_get_value(int id, char *buf, int bufsz) {
     case SETT_P1_RUN:   snprintf(buf, bufsz, "%s", control_key_name(p1_key_run)); break;
     case SETT_P1_JUMP:  snprintf(buf, bufsz, "%s", control_key_name(p1_key_jump)); break;
     case SETT_P1_USE:   snprintf(buf, bufsz, "%s", control_key_name(p1_key_use)); break;
+    case SETT_P1_FIRE:  snprintf(buf, bufsz, "%s", control_key_name(p1_key_fire)); break;
     case SETT_P2_RUN:   snprintf(buf, bufsz, "%s", control_key_name(p2_key_run)); break;
     case SETT_P2_JUMP:  snprintf(buf, bufsz, "%s", control_key_name(p2_key_jump)); break;
     case SETT_P2_USE:   snprintf(buf, bufsz, "%s", control_key_name(p2_key_use)); break;
+    case SETT_P2_FIRE:  snprintf(buf, bufsz, "%s", control_key_name(p2_key_fire)); break;
     }
 }
 
@@ -802,9 +806,11 @@ static void settings_adjust(int id, int dir) {
     case SETT_P1_RUN:
     case SETT_P1_JUMP:
     case SETT_P1_USE:
+    case SETT_P1_FIRE:
     case SETT_P2_RUN:
     case SETT_P2_JUMP:
-    case SETT_P2_USE: {
+    case SETT_P2_USE:
+    case SETT_P2_FIRE: {
         int *target = NULL;
         switch (id) {
         case SETT_P1_UP: target = &p1_key_up; break;
@@ -818,9 +824,11 @@ static void settings_adjust(int id, int dir) {
         case SETT_P1_RUN: target = &p1_key_run; break;
         case SETT_P1_JUMP: target = &p1_key_jump; break;
         case SETT_P1_USE: target = &p1_key_use; break;
+        case SETT_P1_FIRE: target = &p1_key_fire; break;
         case SETT_P2_RUN: target = &p2_key_run; break;
         case SETT_P2_JUMP: target = &p2_key_jump; break;
         case SETT_P2_USE: target = &p2_key_use; break;
+        case SETT_P2_FIRE: target = &p2_key_fire; break;
         }
         int idx = control_key_index(*target);
         idx = (idx + (dir > 0 ? 1 : (int)CONTROL_KEY_COUNT - 1)) % (int)CONTROL_KEY_COUNT;
@@ -875,7 +883,9 @@ static void run_settings_panel(const char *title, const int *items, int num_item
                  id == SETT_P1_RIGHT || id == SETT_P2_UP || id == SETT_P2_DOWN ||
                  id == SETT_P2_LEFT || id == SETT_P2_RIGHT ||
                  id == SETT_P1_RUN || id == SETT_P1_JUMP || id == SETT_P1_USE ||
-                 id == SETT_P2_RUN || id == SETT_P2_JUMP || id == SETT_P2_USE))
+                 id == SETT_P1_FIRE ||
+                 id == SETT_P2_RUN || id == SETT_P2_JUMP || id == SETT_P2_USE ||
+                 id == SETT_P2_FIRE))
                 snprintf(val, sizeof(val), "Press a key...");
             else
                 settings_get_value(id, val, sizeof(val));
@@ -890,7 +900,9 @@ static void run_settings_panel(const char *title, const int *items, int num_item
                            id == SETT_P1_RIGHT || id == SETT_P2_UP || id == SETT_P2_DOWN ||
                            id == SETT_P2_LEFT || id == SETT_P2_RIGHT ||
                            id == SETT_P1_RUN || id == SETT_P1_JUMP || id == SETT_P1_USE ||
-                           id == SETT_P2_RUN || id == SETT_P2_JUMP || id == SETT_P2_USE);
+                           id == SETT_P1_FIRE ||
+                           id == SETT_P2_RUN || id == SETT_P2_JUMP || id == SETT_P2_USE ||
+                           id == SETT_P2_FIRE);
 
         if (controls_listening) {
             /* Capture the first key pressed from the known list. */
@@ -910,9 +922,11 @@ static void run_settings_panel(const char *title, const int *items, int num_item
                     case SETT_P1_RUN: target = &p1_key_run; break;
                     case SETT_P1_JUMP: target = &p1_key_jump; break;
                     case SETT_P1_USE: target = &p1_key_use; break;
+                    case SETT_P1_FIRE: target = &p1_key_fire; break;
                     case SETT_P2_RUN: target = &p2_key_run; break;
                     case SETT_P2_JUMP: target = &p2_key_jump; break;
                     case SETT_P2_USE: target = &p2_key_use; break;
+                    case SETT_P2_FIRE: target = &p2_key_fire; break;
                     }
                     if (target) *target = control_key_table[ki].key;
                     save_port_settings();
@@ -1008,8 +1022,10 @@ void do_controls_menu(void) {
      * run binding would configure a key that does nothing. */
     items[num_items++] = SETT_P1_JUMP;
     items[num_items++] = SETT_P1_USE;
+    items[num_items++] = SETT_P1_FIRE;
     items[num_items++] = SETT_P2_JUMP;
     items[num_items++] = SETT_P2_USE;
+    items[num_items++] = SETT_P2_FIRE;
     run_settings_panel("Controls", items, num_items);
 }
 

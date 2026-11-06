@@ -34,8 +34,8 @@ extern int coop_num_players;
 extern int p1_key_up, p1_key_down, p1_key_left, p1_key_right;
 extern int p2_key_up, p2_key_down, p2_key_left, p2_key_right;
 /* Configurable action keys. */
-extern int p1_key_run, p1_key_jump, p1_key_use;
-extern int p2_key_run, p2_key_jump, p2_key_use;
+extern int p1_key_run, p1_key_jump, p1_key_use, p1_key_fire;
+extern int p2_key_run, p2_key_jump, p2_key_use, p2_key_fire;
 
 /* True when this build should offer local co-op. Controlled by
  * ECSTATICA_COOP=0 to disable; on by default. */
@@ -69,6 +69,13 @@ void coop_split_view_end_player2(void);
  * begin returns true when globals were swapped and end must be called. */
 bool coop_begin_actor_input(actor_t *actor);
 void coop_end_actor_input(void);
+
+/* Fire a pistol shot from this player's right hand (reuses the E2
+ * FireBullet logic). Called when the fire key rising edge was seen. */
+void coop_player_try_fire(actor_t *actor);
+
+/* Returns true (and clears) if a fire was requested for this player this frame. */
+bool coop_consume_fire(int player_index);
 
 /* Load a second instance of a thing that is already in the world. Defined in
  * game.c because it touches the actor loader's static bookkeeping. */
